@@ -19,8 +19,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { Command } from "commander";
-import type { PluginContext, ExtensionApi } from "openclaw/plugin-sdk";
+import type { Command } from "commander";
 
 import { DEFAULT_CONFIG } from "./src/types.js";
 import {
@@ -34,20 +33,49 @@ import {
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
 let dailyInterval: ReturnType<typeof setInterval> | null = null;
 
+// Plugin API type (matches OpenClaw plugin interface)
+type PluginApi = {
+  config: Record<string, unknown>;
+  pluginConfig?: Record<string, unknown>;
+  logger: {
+    debug?: (msg: string) => void;
+    info: (msg: string) => void;
+    warn: (msg: string) => void;
+    error: (msg: string) => void;
+  };
+  registerService: (service: {
+    id: string;
+    start: (ctx: unknown) => void | Promise<void>;
+    stop?: (ctx: unknown) => void | Promise<void>;
+  }) => void;
+  registerCli: (
+    registrar: (ctx: { program: Command }) => void | Promise<void>,
+    opts?: { commands?: string[] },
+  ) => void;
+  registerHttpRoute: (params: {
+    path: string;
+    handler: (
+      req: import("node:http").IncomingMessage,
+      res: import("node:http").ServerResponse,
+    ) => Promise<void> | void;
+  }) => void;
+};
+
 const trendScoutPlugin = {
-  name: "trend-scout",
+  id: "trend-scout",
+  name: "Trend Scout",
+  description: "Autonomous trend monitoring - scans HN, Reddit, GitHub for tech trends",
   version: "0.1.0",
 
-  async register(api: ExtensionApi, ctx: PluginContext) {
-    extensionApi = api;
-    const logger = ctx.logger.child({ plugin: "trend-scout" });
+  register(api: PluginApi) {
+    const logger = api.logger;
 
     logger.info("Trend Scout extension loading...");
 
     // -------------------------------------------------------------------
     // 1. Register CLI commands
     // -------------------------------------------------------------------
-    api.registerCommand((program: Command) => {
+    api.registerCli(({ program }) => {
       const cmd = program
         .command("trend-scout")
         .description("Autonomous trend monitoring agent");
@@ -152,8 +180,7 @@ const trendScoutPlugin = {
           console.log(`Hours back: ${config.hoursBack}`);
         });
 
-      return cmd;
-    });
+    }, { commands: ["trend-scout"] });
 
     // -------------------------------------------------------------------
     // 2. Register HTTP endpoints

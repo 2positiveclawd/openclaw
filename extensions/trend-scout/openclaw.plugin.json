@@ -1,5 +1,5 @@
 {
-  "name": "trend-scout",
+  "id": "trend-scout",
   "version": "0.1.0",
   "description": "Autonomous trend monitoring agent - scans HN, Reddit, GitHub for relevant tech trends",
   "entry": "./index.ts",
@@ -8,5 +8,27 @@
     "/trend-scout/status",
     "/trend-scout/run",
     "/trend-scout/latest"
-  ]
+  ],
+  "uiHints": {
+    "enabled": {
+      "label": "Enable Trend Scout"
+    },
+    "scanHour": {
+      "label": "Daily Scan Hour (0-23)"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "scanHour": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 23
+      }
+    }
+  }
 }
