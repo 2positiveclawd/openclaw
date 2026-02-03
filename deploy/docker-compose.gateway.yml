@@ -1,0 +1,102 @@
+# OpenClawd Gateway - Docker Compose Deployment
+#
+# Usage:
+#   1. Copy .env.example to .env and fill in your secrets
+#   2. docker compose -f deploy/docker-compose.gateway.yml up -d
+#
+# First time setup:
+#   docker compose -f deploy/docker-compose.gateway.yml build
+
+services:
+  openclawd-gateway:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    image: openclawd-gateway:latest
+    container_name: openclawd-gateway
+    restart: unless-stopped
+    init: true
+
+    # Security: Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    # Security: Drop capabilities and set read-only where possible
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      # Needed for chromium sandbox
+      - SYS_ADMIN
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      # Core
+      HOME: /home/openclaw
+      NODE_ENV: production
+      TZ: ${TZ:-UTC}
+
+      # Gateway auth (required for security)
+      OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:?Gateway token required}
+
+      # Provider API keys
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-}
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Discord bot
+      DISCORD_BOT_TOKEN: ${DISCORD_BOT_TOKEN:-}
+
+      # Chromium for WhatsApp/Signal
+      PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+      PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+
+    volumes:
+      # Main config (contains openclaw.json, extensions, etc.)
+      - openclawd-config:/home/openclaw/.openclaw
+
+      # Secrets file (read-only)
+      - ${SECRETS_FILE:-./secrets.env}:/run/secrets/openclaw.env:ro
+
+      # Optional: Mount host workspace for agent file access
+      # Uncomment and adjust path if needed:
+      # - ${WORKSPACE_DIR:-/tmp/openclawd-workspace}:/home/openclaw/workspace
+
+    ports:
+      - "${GATEWAY_PORT:-18789}:18789"
+
+    # Security: Restrict network (optional - uncomment for stricter isolation)
+    # networks:
+    #   - openclawd-internal
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:18789/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  openclawd-config:
+    name: openclawd-config
+
+# Optional: Isolated network
+# networks:
+#   openclawd-internal:
+#     driver: bridge
