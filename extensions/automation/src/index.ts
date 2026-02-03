@@ -49,6 +49,14 @@ export { evaluateChains };
 // Re-export Discord functions
 export { notifyDiscord, saveDiscordConfig, getDiscordConfig };
 
+// Re-export learning functions
+export {
+  recordLearning,
+  findSimilarGoals,
+  generateLearningContext,
+  getStats as getLearningStats,
+} from "./learnings.js";
+
 /**
  * Fire an automation event
  *

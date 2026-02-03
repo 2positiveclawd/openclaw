@@ -145,7 +145,7 @@ type NotifyFn = (notify: GoalNotifyConfig, message: string) => Promise<void>;
 // Build iteration prompt
 // ---------------------------------------------------------------------------
 
-function buildIterationPrompt(goal: GoalState): string {
+async function buildIterationPrompt(goal: GoalState): Promise<string> {
   const criteriaList = goal.criteria.map((c, i) => `${i + 1}. ${c}`).join("\n");
   let prompt = `You are working toward the following goal:
 
@@ -153,9 +153,18 @@ function buildIterationPrompt(goal: GoalState): string {
 ${goal.goal}
 
 ## Acceptance Criteria
-${criteriaList}
+${criteriaList}`;
 
-## Progress
+  // On first iteration, inject learning context from similar past goals
+  if (goal.usage.iterations === 0) {
+    const learningContext = await getLearningContext(goal.goal);
+    if (learningContext) {
+      console.log(`[goal-loop] Injecting learning context for goal ${goal.id} (found similar past goals)`);
+      prompt += `\n\n${learningContext}`;
+    }
+  }
+
+  prompt += `\n\n## Progress
 - Iteration: ${goal.usage.iterations + 1}
 - Tokens used: ${goal.usage.totalTokens}`;
 
@@ -360,7 +369,7 @@ async function loopBody(
     // -----------------------------------------------------------------------
     // 3. Build iteration prompt
     // -----------------------------------------------------------------------
-    const prompt = buildIterationPrompt(goal);
+    const prompt = await buildIterationPrompt(goal);
 
     // -----------------------------------------------------------------------
     // 4. Run agent turn
