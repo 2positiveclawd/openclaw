@@ -1,0 +1,63 @@
+{
+  "id": "researcher",
+  "uiHints": {
+    "enabled": {
+      "label": "Enable Researcher"
+    },
+    "maxConcurrentResearches": {
+      "label": "Max Concurrent Researches"
+    },
+    "defaultMaxRounds": {
+      "label": "Default Max Interview Rounds"
+    },
+    "interviewTimeoutMs": {
+      "label": "Interview Timeout (ms)",
+      "advanced": true,
+      "help": "How long to wait for user answers before timing out."
+    },
+    "defaultPlannerBudget": {
+      "label": "Default Planner Budget",
+      "advanced": true,
+      "help": "Default budget settings when launching a plan from a generated PRD."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "maxConcurrentResearches": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultMaxRounds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10
+      },
+      "interviewTimeoutMs": {
+        "type": "integer",
+        "minimum": 60000
+      },
+      "defaultPlannerBudget": {
+        "type": "object",
+        "properties": {
+          "maxAgentTurns": {
+            "type": "integer"
+          },
+          "maxTokens": {
+            "type": "integer"
+          },
+          "maxTimeMs": {
+            "type": "integer"
+          },
+          "maxConcurrency": {
+            "type": "integer"
+          }
+        }
+      }
+    }
+  }
+}

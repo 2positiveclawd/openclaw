@@ -1,0 +1,14 @@
+{
+  "name": "@openclaw/researcher",
+  "version": "2026.2.1",
+  "description": "OpenClaw researcher plugin — research, interview, and PRD generation for vague goals",
+  "type": "module",
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}
