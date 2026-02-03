@@ -26,10 +26,10 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '2'
+          cpus: "2"
           memory: 4G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
 
     # Security: Drop capabilities and set read-only where possible
@@ -82,7 +82,8 @@ services:
       # - openclawd-config:/home/${HOST_USER:-azureuser}/.openclaw
 
     ports:
-      - "${GATEWAY_PORT:-18789}:18789"
+      # Bind to localhost only for security (matches systemd loopback binding)
+      - "127.0.0.1:${GATEWAY_PORT:-18789}:18789"
 
     # Security: Restrict network (optional - uncomment for stricter isolation)
     # networks:
