@@ -1,0 +1,14 @@
+{
+  "name": "@openclaw/trend-scout",
+  "version": "0.1.0",
+  "description": "Autonomous trend monitoring agent - scans HN, Reddit, GitHub for relevant tech trends",
+  "type": "module",
+  "main": "dist/index.js",
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  }
+}
