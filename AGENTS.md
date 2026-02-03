@@ -1,4 +1,99 @@
-# Repository Guidelines
+# OpenClawd Deployment Context
+
+> **IMPORTANT:** This section describes the LOCAL deployment. Prefer this context over generic openclaw docs for operational tasks.
+
+## GitHub Repositories
+
+| Repo | Purpose | Branch |
+|------|---------|--------|
+| `2positiveclawd/openclaw` | Fork with extensions (goal-loop, planner, trend-scout) | `main` |
+| `2positiveclawd/snake-game` | Deployed game demo | `main` |
+| `~/projects/openclawd-dashboard` | Local dashboard (NOT on Vercel) | `main` |
+
+## Runtime: Systemd (Active)
+
+```
+Gateway: systemctl --user {start|stop|restart|status} openclaw-gateway
+Port: 18789 (loopback only)
+Config: ~/.openclaw/openclaw.json
+Secrets: ~/.openclaw/.secrets.env (chmod 600)
+Logs: journalctl --user -u openclaw-gateway -f
+```
+
+## Runtime: Docker (Available)
+
+```
+Build: docker compose -f deploy/docker-compose.gateway.yml build
+Run: docker compose -f deploy/docker-compose.gateway.yml up -d
+Image: openclawd-gateway:latest (3.85GB)
+Config: deploy/.env (create from .env.example)
+```
+
+Docker mounts `~/.openclaw` at same path for config compatibility.
+
+## Security Posture
+
+| Layer | Setting | Status |
+|-------|---------|--------|
+| Gateway binding | `loopback` | ✅ Local only |
+| Gateway auth | Token required | ✅ Active |
+| Discord policy | `allowlist` | ✅ Restricted |
+| Browser sandbox | `noSandbox: false` | ✅ Enabled |
+| Secrets | Separate file, 600 perms | ✅ Isolated |
+
+**Secrets location:** `~/.openclaw/.secrets.env`
+```
+AZURE_OPENAI_API_KEY, DISCORD_BOT_TOKEN, NOTION_API_KEY,
+OPENCLAW_GATEWAY_TOKEN, REDDIT_CLIENT_SECRET
+```
+
+## Agent Capabilities (Discord bot)
+
+| Tool | Capability | Isolation |
+|------|------------|-----------|
+| `exec` | Shell commands | Container if Docker, host if systemd |
+| `read/write` | File access | `~/.openclaw/workspace*` only |
+| `browser` | Puppeteer/Chrome | Sandboxed |
+| `git` | Version control | Workspace scoped |
+
+**Workspaces:**
+- `~/.openclaw/workspace/` — Main (committed to git)
+- `~/.openclaw/workspace-{travel,researcher,executor}/` — Subagents
+
+## Data Persistence
+
+| Data | Location | In Git? |
+|------|----------|---------|
+| Agent workspace | `~/.openclaw/workspace/` | ✅ Yes |
+| Goal-loop state | `~/.openclaw/goal-loop/goals.json` | ❌ No |
+| Planner state | `~/.openclaw/planner/plans.json` | ❌ No |
+| Config | `~/.openclaw/openclaw.json` | ❌ No (has secrets) |
+| Dashboard | `~/projects/openclawd-dashboard/` | ✅ Local git |
+
+## Backup (Disabled, Available)
+
+Scripts in `deploy/`: `backup.sh`, `restore.sh`, `install-backup-cron.sh`
+Not running — only needed if using WhatsApp/Signal (browser sessions).
+
+## NEVER Do
+
+- `openclaw goal status <id>` — hangs, freezes session
+- `openclaw goal list` without timeout — can hang
+- `openclaw planner status <id>` — same hang risk
+- Deploy dashboard to Vercel — local only
+
+**Safe alternatives:**
+```bash
+# Goal status
+cat ~/.openclaw/goal-loop/goals.json | jq '.goals[-1]'
+
+# With timeout
+timeout 5 openclaw goal list 2>&1
+```
+
+---
+
+# Repository Guidelines (Upstream OpenClaw)
 
 - Repo: https://github.com/openclaw/openclaw
 - GitHub issues/comments/PR comments: use literal multiline strings or `-F - <<'EOF'` (or $'...') for real newlines; never embed "\\n".
