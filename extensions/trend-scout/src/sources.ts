@@ -71,7 +71,7 @@ export async function fetchHackerNews(config: TrendScoutConfig): Promise<TrendIt
 }
 
 // ---------------------------------------------------------------------------
-// Reddit
+// Reddit (OAuth2 Authentication)
 // ---------------------------------------------------------------------------
 
 interface RedditPost {
@@ -94,14 +94,78 @@ interface RedditListing {
   };
 }
 
+// Cache the access token
+let redditAccessToken: string | null = null;
+let redditTokenExpiry = 0;
+
+async function getRedditAccessToken(config: TrendScoutConfig): Promise<string | null> {
+  // Return cached token if still valid
+  if (redditAccessToken && Date.now() < redditTokenExpiry - 60000) {
+    return redditAccessToken;
+  }
+
+  // Get credentials from config or environment
+  const clientId = config.reddit?.clientId || process.env.REDDIT_CLIENT_ID || "";
+  const clientSecret = config.reddit?.clientSecret || process.env.REDDIT_CLIENT_SECRET || "";
+  const userAgent = config.reddit?.userAgent || process.env.REDDIT_USER_AGENT || "OpenClaw-TrendScout/1.0";
+
+  if (!clientId || !clientSecret) {
+    console.warn("[trend-scout] Reddit credentials not configured (set in config or REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET env vars)");
+    return null;
+  }
+
+  try {
+    const auth = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+
+    const res = await fetch("https://www.reddit.com/api/v1/access_token", {
+      method: "POST",
+      headers: {
+        "Authorization": `Basic ${auth}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": userAgent,
+      },
+      body: "grant_type=client_credentials",
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      console.error(`[trend-scout] Reddit auth failed: ${res.status} ${text}`);
+      return null;
+    }
+
+    const data = await res.json() as { access_token: string; expires_in: number };
+    redditAccessToken = data.access_token;
+    redditTokenExpiry = Date.now() + data.expires_in * 1000;
+
+    console.log("[trend-scout] Reddit OAuth2 token acquired");
+    return redditAccessToken;
+  } catch (err) {
+    console.error("[trend-scout] Reddit auth error:", err);
+    return null;
+  }
+}
+
 export async function fetchReddit(config: TrendScoutConfig): Promise<TrendItem[]> {
   const items: TrendItem[] = [];
   const cutoffTime = Date.now() - config.hoursBack * 60 * 60 * 1000;
 
+  // Get OAuth token
+  const token = await getRedditAccessToken(config);
+  if (!token) {
+    console.warn("[trend-scout] Skipping Reddit (no auth token)");
+    return items;
+  }
+
+  const userAgent = config.reddit?.userAgent || process.env.REDDIT_USER_AGENT || "OpenClaw-TrendScout/1.0";
+
   for (const subreddit of config.subreddits) {
     try {
-      const res = await fetch(`https://www.reddit.com/r/${subreddit}/hot.json?limit=25`, {
-        headers: { "User-Agent": USER_AGENT },
+      // Use oauth.reddit.com with Bearer token
+      const res = await fetch(`https://oauth.reddit.com/r/${subreddit}/hot?limit=25`, {
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "User-Agent": userAgent,
+        },
       });
 
       if (!res.ok) {

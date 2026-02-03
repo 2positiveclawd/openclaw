@@ -20,6 +20,13 @@ export interface TrendScoutConfig {
 
   // Hours to look back
   hoursBack: number;
+
+  // Reddit API credentials (optional - can also use env vars)
+  reddit?: {
+    clientId: string;
+    clientSecret: string;
+    userAgent?: string;
+  };
 }
 
 export interface TrendItem {
