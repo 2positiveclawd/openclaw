@@ -46,16 +46,22 @@ RUN OPENCLAW_A2UI_SKIP_MISSING=1 pnpm build
 ENV OPENCLAW_PREFER_PNPM=1
 RUN pnpm ui:build
 
-# Create non-root user with home directory
-RUN useradd -m -s /bin/bash openclaw && \
-    chown -R openclaw:openclaw /app
+# Create user with same UID/home as typical host setup
+# This allows mounting host config with correct permissions
+ARG HOST_USER=azureuser
+ARG HOST_UID=1000
+ARG HOST_GID=1000
 
-# Create data directories
-RUN mkdir -p /home/openclaw/.openclaw && \
-    chown -R openclaw:openclaw /home/openclaw
+RUN groupadd -g ${HOST_GID} ${HOST_USER} 2>/dev/null || true && \
+    useradd -m -u ${HOST_UID} -g ${HOST_GID} -s /bin/bash ${HOST_USER} && \
+    chown -R ${HOST_UID}:${HOST_GID} /app
+
+# Create data directories matching host paths
+RUN mkdir -p /home/${HOST_USER}/.openclaw && \
+    chown -R ${HOST_UID}:${HOST_GID} /home/${HOST_USER}
 
 ENV NODE_ENV=production
-ENV HOME=/home/openclaw
+ENV HOME=/home/${HOST_USER}
 
 # Security: Run as non-root
 USER openclaw

@@ -12,6 +12,11 @@ services:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.gateway
+      args:
+        # Match your host user for permission compatibility
+        HOST_USER: ${HOST_USER:-azureuser}
+        HOST_UID: ${HOST_UID:-1000}
+        HOST_GID: ${HOST_GID:-1000}
     image: openclawd-gateway:latest
     container_name: openclawd-gateway
     restart: unless-stopped
@@ -40,8 +45,8 @@ services:
       - no-new-privileges:true
 
     environment:
-      # Core
-      HOME: /home/openclaw
+      # Core - HOME must match host paths in config
+      HOME: /home/${HOST_USER:-azureuser}
       NODE_ENV: production
       TZ: ${TZ:-UTC}
 
@@ -62,15 +67,19 @@ services:
       PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
 
     volumes:
-      # Main config (contains openclaw.json, extensions, etc.)
-      - openclawd-config:/home/openclaw/.openclaw
+      # Main config directory - mount at same path as host for config compatibility
+      # This includes: workspace, workspace-*, goal-loop, planner, agents, browser, etc.
+      - ${OPENCLAW_CONFIG_DIR:-~/.openclaw}:/home/${HOST_USER:-azureuser}/.openclaw
 
       # Secrets file (read-only)
       - ${SECRETS_FILE:-./secrets.env}:/run/secrets/openclaw.env:ro
 
-      # Optional: Mount host workspace for agent file access
-      # Uncomment and adjust path if needed:
-      # - ${WORKSPACE_DIR:-/tmp/openclawd-workspace}:/home/openclaw/workspace
+      # Agent workspaces (these paths are hardcoded in openclaw.json)
+      # The main .openclaw mount above covers these, but you can override:
+      # - ${WORKSPACE_DIR:-~/.openclaw/workspace}:/home/${HOST_USER:-azureuser}/.openclaw/workspace
+
+      # For extra isolation, you can use named volumes instead:
+      # - openclawd-config:/home/${HOST_USER:-azureuser}/.openclaw
 
     ports:
       - "${GATEWAY_PORT:-18789}:18789"
@@ -92,9 +101,10 @@ services:
       retries: 3
       start_period: 30s
 
-volumes:
-  openclawd-config:
-    name: openclawd-config
+# Named volumes (only used if you uncomment the named volume mount above)
+# volumes:
+#   openclawd-config:
+#     name: openclawd-config
 
 # Optional: Isolated network
 # networks:

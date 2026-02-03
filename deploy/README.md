@@ -67,10 +67,36 @@ Or use the migration script:
 
 ## Volume Mounts
 
-| Volume | Path in Container | Purpose |
-|--------|-------------------|---------|
-| `openclawd-config` | `/home/openclaw/.openclaw` | Config, sessions, goals, plans |
-| `secrets.env` | `/run/secrets/openclaw.env` | API keys (read-only) |
+The container mounts your host `~/.openclaw` directory to preserve path compatibility with your config.
+
+| Host Path | Container Path | Purpose |
+|-----------|----------------|---------|
+| `~/.openclaw` | `/home/azureuser/.openclaw` | Everything (see below) |
+| `./secrets.env` | `/run/secrets/openclaw.env` | API keys (read-only) |
+
+### What's in ~/.openclaw (Agent Directories)
+
+```
+~/.openclaw/
+├── openclaw.json          # Main config
+├── workspace/             # Main agent workspace (projects, memory, files)
+├── workspace-travel/      # Travel agent workspace
+├── workspace-researcher/  # Researcher agent workspace
+├── workspace-executor/    # Executor agent workspace
+├── goal-loop/             # Goal states, iterations, history
+├── planner/               # Planner states, tasks, DAGs
+├── agents/                # Agent sessions and logs
+├── browser/               # Chrome/Puppeteer sessions & cookies
+├── dashboard/             # Trend digests and reports
+├── prds/                  # Product requirement documents
+├── researcher/            # Research outputs
+├── media/                 # Media files (images, videos)
+├── cron/                  # Cron job states
+├── logs/                  # Gateway logs
+└── extensions/            # Custom plugins
+```
+
+**Important:** The config has hardcoded paths like `/home/azureuser/.openclaw/workspace`. The container creates a matching user so these paths work inside the container.
 
 ## Commands
 
