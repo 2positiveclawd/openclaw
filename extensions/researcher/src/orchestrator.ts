@@ -17,6 +17,36 @@ import { runResearchAgent } from "./research-agent.js";
 import { runInterviewAgent } from "./interview-agent.js";
 import { runSynthesizerAgent, writePrdFile } from "./synthesizer-agent.js";
 
+// ---------------------------------------------------------------------------
+// Automation (webhooks, chains) - optional, fails silently if not available
+// ---------------------------------------------------------------------------
+
+let automationModule: typeof import("../../automation/src/index.js") | null = null;
+
+async function loadAutomation() {
+  if (automationModule !== null) return automationModule;
+  try {
+    automationModule = await import("../../automation/src/index.js");
+    return automationModule;
+  } catch {
+    return null;
+  }
+}
+
+async function fireAutomationEvent(
+  eventFn: (mod: typeof import("../../automation/src/index.js")) => import("../../automation/src/index.js").AutomationEvent
+) {
+  try {
+    const mod = await loadAutomation();
+    if (mod) {
+      const event = eventFn(mod);
+      await mod.fireEvent(event);
+    }
+  } catch (err) {
+    console.error("[researcher] Automation event failed:", err);
+  }
+}
+
 type Logger = {
   info: (message: string) => void;
   warn: (message: string) => void;
@@ -249,6 +279,9 @@ async function orchestratorBody(
       `Researching your goal: ${research.originalGoal} [${research.id}]. I'll ask you some questions shortly.`,
     ).catch(() => {});
   }
+
+  // Fire automation event: research.started
+  await fireAutomationEvent((mod) => mod.events.researchStarted(research.id, research.originalGoal));
 
   // =========================================================================
   // LOOP: research → interview → (repeat)
@@ -486,6 +519,12 @@ async function orchestratorBody(
       `Research complete! PRD saved at ${prdPath} [${research.id}].\nReply: /research-go ${research.id} to start building\nReply: /research-view ${research.id} to review the PRD first`,
     ).catch(() => {});
   }
+
+  // Fire automation event: research.completed
+  const duration = Date.now() - (research.usage.startedAtMs || Date.now());
+  await fireAutomationEvent((mod) =>
+    mod.events.researchCompleted(research.id, research.originalGoal, duration)
+  );
 
   // --- Wait for "go" ---
   ctx.logger.info(`Research ${research.id}: waiting for go signal`);

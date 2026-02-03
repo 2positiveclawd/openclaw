@@ -1,0 +1,26 @@
+{
+  "name": "@openclaw/automation",
+  "version": "0.1.0",
+  "description": "Automation extension for OpenClaw - webhooks, chains, and event dispatch",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^5.3.0",
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  }
+}
