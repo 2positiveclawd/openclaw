@@ -5,14 +5,20 @@
 // Autonomous trend monitoring agent that scans HN, Reddit, and GitHub for
 // relevant tech trends, analyzes them with LLM, and stores insights in memory.
 //
+// Features:
+//   - Daily automated scans (9am by default)
+//   - Heartbeat integration (agent checks trends periodically)
+//   - Memory integration (trends stored in workspace/memory/)
+//
 // Usage:
 //   openclaw trend-scout run          # Run a trend scan now
 //   openclaw trend-scout status       # Show recent digests
 //   openclaw trend-scout config       # Show/edit configuration
 //
-// The extension also registers a daily cron job to run automatically.
 // ---------------------------------------------------------------------------
 
+import fs from "node:fs";
+import path from "node:path";
 import { Command } from "commander";
 import type { PluginContext, ExtensionApi } from "openclaw/plugin-sdk";
 
@@ -24,8 +30,9 @@ import {
   saveConfig,
 } from "./src/scout-service.js";
 
-// Store reference to API for cron job
-let extensionApi: ExtensionApi | null = null;
+// Store reference for cleanup
+let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
+let dailyInterval: ReturnType<typeof setInterval> | null = null;
 
 const trendScoutPlugin = {
   name: "trend-scout",
@@ -203,13 +210,167 @@ const trendScoutPlugin = {
     });
 
     // -------------------------------------------------------------------
-    // 3. Register daily cron job (optional - can be disabled in config)
+    // 3. Register scheduler service (daily scans)
     // -------------------------------------------------------------------
-    // Note: This runs at 9am daily if cron is enabled
-    // Users can also trigger manually via CLI or HTTP
+    api.registerService({
+      id: "trend-scout-scheduler",
+
+      start: async (ctx: { stateDir: string; logger: typeof logger }) => {
+        const serviceLogger = ctx.logger || logger;
+        serviceLogger.info("Trend Scout scheduler starting...");
+
+        // Configuration for scheduler
+        const SCAN_HOUR = 9; // Run at 9am local time
+        const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+
+        // Calculate time until next 9am
+        const now = new Date();
+        const next9am = new Date(now);
+        next9am.setHours(SCAN_HOUR, 0, 0, 0);
+        if (now.getTime() >= next9am.getTime()) {
+          next9am.setDate(next9am.getDate() + 1);
+        }
+        const msUntilNext = next9am.getTime() - now.getTime();
+
+        serviceLogger.info(
+          `Next scheduled scan at ${next9am.toISOString()} (in ${Math.round(msUntilNext / 60000)} minutes)`
+        );
+
+        // Schedule first run
+        schedulerTimer = setTimeout(async () => {
+          serviceLogger.info("Running scheduled trend scan...");
+          try {
+            const result = await runTrendScout({}, { notify: true });
+            serviceLogger.info(`Scheduled scan complete: ${result.success ? "success" : "failed"}`);
+
+            // Update HEARTBEAT.md with latest trends summary
+            await updateHeartbeatFile(result);
+          } catch (err) {
+            serviceLogger.error("Scheduled scan failed:", err);
+          }
+
+          // Then run daily
+          dailyInterval = setInterval(async () => {
+            serviceLogger.info("Running daily trend scan...");
+            try {
+              const result = await runTrendScout({}, { notify: true });
+              serviceLogger.info(`Daily scan complete: ${result.success ? "success" : "failed"}`);
+              await updateHeartbeatFile(result);
+            } catch (err) {
+              serviceLogger.error("Daily scan failed:", err);
+            }
+          }, ONE_DAY_MS);
+        }, msUntilNext);
+
+        // Also check if we should run now (no scan today yet)
+        const today = now.toISOString().split("T")[0];
+        const digests = getRecentDigests(1);
+        if (digests.length === 0 || digests[0].date !== today) {
+          serviceLogger.info("No scan for today yet, running initial scan...");
+          setTimeout(async () => {
+            try {
+              const result = await runTrendScout({}, { notify: false });
+              serviceLogger.info(`Initial scan complete: ${result.success ? "success" : "failed"}`);
+              await updateHeartbeatFile(result);
+            } catch (err) {
+              serviceLogger.error("Initial scan failed:", err);
+            }
+          }, 5000); // Small delay to let gateway fully start
+        }
+      },
+
+      stop: async () => {
+        logger.info("Trend Scout scheduler stopping...");
+        if (schedulerTimer) {
+          clearTimeout(schedulerTimer);
+          schedulerTimer = null;
+        }
+        if (dailyInterval) {
+          clearInterval(dailyInterval);
+          dailyInterval = null;
+        }
+      },
+    });
 
     logger.info("Trend Scout extension loaded");
   },
 };
+
+// ---------------------------------------------------------------------------
+// Heartbeat Integration
+// ---------------------------------------------------------------------------
+// Updates HEARTBEAT.md in workspace with trend-related tasks for the agent
+
+async function updateHeartbeatFile(result: Awaited<ReturnType<typeof runTrendScout>>) {
+  const workspaceDir = process.env.OPENCLAW_WORKSPACE ||
+    path.join(process.env.HOME || "/home/azureuser", ".openclaw/workspace");
+  const heartbeatPath = path.join(workspaceDir, "HEARTBEAT.md");
+
+  // Read existing HEARTBEAT.md or create new
+  let content = "";
+  try {
+    if (fs.existsSync(heartbeatPath)) {
+      content = fs.readFileSync(heartbeatPath, "utf-8");
+    }
+  } catch {
+    // File doesn't exist, will create
+  }
+
+  // Remove old trend-scout section if present
+  const trendSectionStart = "<!-- trend-scout-start -->";
+  const trendSectionEnd = "<!-- trend-scout-end -->";
+  const startIdx = content.indexOf(trendSectionStart);
+  const endIdx = content.indexOf(trendSectionEnd);
+  if (startIdx !== -1 && endIdx !== -1) {
+    content = content.slice(0, startIdx) + content.slice(endIdx + trendSectionEnd.length);
+  }
+
+  // Build new trend section
+  const trendSection = buildTrendHeartbeatSection(result);
+
+  // Append to content
+  content = content.trim() + "\n\n" + trendSection;
+
+  // Write back
+  fs.writeFileSync(heartbeatPath, content.trim() + "\n");
+}
+
+function buildTrendHeartbeatSection(result: Awaited<ReturnType<typeof runTrendScout>>): string {
+  const lines: string[] = [
+    "<!-- trend-scout-start -->",
+    "## Trend Scout",
+    "",
+  ];
+
+  if (result.success && result.digest) {
+    const digest = result.digest;
+    lines.push(`**Last scan:** ${digest.date} | **Items:** ${digest.items.length}`);
+    lines.push("");
+    lines.push("### Today's Key Insights");
+    lines.push("");
+    digest.insights.slice(0, 3).forEach((insight) => {
+      lines.push(`- ${insight}`);
+    });
+    lines.push("");
+    lines.push("### Opportunities to Consider");
+    lines.push("");
+    digest.opportunities.slice(0, 2).forEach((opp) => {
+      lines.push(`- [ ] ${opp}`);
+    });
+    lines.push("");
+    lines.push("### Action Items");
+    lines.push("");
+    lines.push("- [ ] Review today's trends in `memory/trends-" + digest.date + ".md`");
+    lines.push("- [ ] Consider if any opportunities align with current projects");
+    lines.push("- [ ] Flag any security-related trends for immediate attention");
+  } else {
+    lines.push("⚠️ Last trend scan failed. Run `openclaw trend-scout run` to retry.");
+  }
+
+  lines.push("");
+  lines.push("<!-- trend-scout-end -->");
+
+  return lines.join("\n");
+}
 
 export default trendScoutPlugin;
