@@ -1,0 +1,69 @@
+{
+  "id": "planner",
+  "uiHints": {
+    "enabled": {
+      "label": "Enable Planner"
+    },
+    "maxConcurrentPlans": {
+      "label": "Max Concurrent Plans"
+    },
+    "defaultMaxAgentTurns": {
+      "label": "Default Max Agent Turns"
+    },
+    "defaultMaxTokens": {
+      "label": "Default Max Tokens"
+    },
+    "defaultMaxTimeMs": {
+      "label": "Default Max Time (ms)"
+    },
+    "defaultMaxConcurrency": {
+      "label": "Default Worker Concurrency"
+    },
+    "defaultMaxRetries": {
+      "label": "Default Per-Task Retries"
+    },
+    "defaultReplanThreshold": {
+      "label": "Default Replan Threshold (%)",
+      "advanced": true,
+      "help": "Re-plan if more than this percentage of a batch fails."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "maxConcurrentPlans": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultMaxAgentTurns": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultMaxTokens": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultMaxTimeMs": {
+        "type": "integer",
+        "minimum": 1000
+      },
+      "defaultMaxConcurrency": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultMaxRetries": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "defaultReplanThreshold": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      }
+    }
+  }
+}

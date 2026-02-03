@@ -1,0 +1,92 @@
+{
+  "id": "goal-loop",
+  "uiHints": {
+    "enabled": {
+      "label": "Enable Goal Loop"
+    },
+    "maxConcurrentGoals": {
+      "label": "Max Concurrent Goals"
+    },
+    "defaultEvalModel": {
+      "label": "Default Evaluator Model",
+      "help": "Model alias or provider/model for progress evaluation (uses agent model if unset)."
+    },
+    "defaultBudgetIterations": {
+      "label": "Default Max Iterations"
+    },
+    "defaultBudgetTokens": {
+      "label": "Default Max Tokens"
+    },
+    "defaultBudgetTimeMs": {
+      "label": "Default Max Time (ms)"
+    },
+    "defaultEvalEvery": {
+      "label": "Default Eval Frequency"
+    },
+    "defaultStallThreshold": {
+      "label": "Default Stall Threshold"
+    },
+    "defaultProviderUsageThreshold": {
+      "label": "Provider Usage Threshold (%)",
+      "advanced": true
+    },
+    "approvalTimeoutMs": {
+      "label": "Quality Gate Approval Timeout (ms)",
+      "advanced": true
+    },
+    "approvalTimeoutAction": {
+      "label": "Approval Timeout Action",
+      "advanced": true,
+      "help": "What to do when quality gate approval times out: auto-approve or auto-reject."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "maxConcurrentGoals": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultEvalModel": {
+        "type": "string"
+      },
+      "defaultBudgetIterations": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultBudgetTokens": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultBudgetTimeMs": {
+        "type": "integer",
+        "minimum": 1000
+      },
+      "defaultEvalEvery": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "defaultStallThreshold": {
+        "type": "integer",
+        "minimum": 2
+      },
+      "defaultProviderUsageThreshold": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "approvalTimeoutMs": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "approvalTimeoutAction": {
+        "type": "string",
+        "enum": ["auto-approve", "auto-reject"]
+      }
+    }
+  }
+}

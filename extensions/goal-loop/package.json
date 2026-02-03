@@ -1,0 +1,14 @@
+{
+  "name": "@openclaw/goal-loop",
+  "version": "2026.2.1",
+  "description": "OpenClaw goal-loop plugin — autonomous goal-directed agent loops with governance",
+  "type": "module",
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

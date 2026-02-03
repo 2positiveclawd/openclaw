@@ -1,0 +1,14 @@
+{
+  "name": "@openclaw/planner",
+  "version": "2026.2.1",
+  "description": "OpenClaw planner plugin — task-based goal decomposition with DAG scheduling and parallel execution",
+  "type": "module",
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

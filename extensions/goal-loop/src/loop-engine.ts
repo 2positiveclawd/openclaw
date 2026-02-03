@@ -15,12 +15,17 @@ import { runProgressEvaluation } from "./evaluator.js";
 // Automation (webhooks, chains) - optional, fails silently if not available
 // ---------------------------------------------------------------------------
 
-let automationModule: typeof import("../../automation/src/index.js") | null = null;
+let automationModule: typeof import("../../automation/dist/index.js") | null = null;
 
 async function loadAutomation() {
   if (automationModule !== null) return automationModule;
   try {
-    automationModule = await import("../../automation/src/index.js");
+    // Try dist (compiled) first, then src (for jiti/dev mode)
+    try {
+      automationModule = await import("../../automation/dist/index.js");
+    } catch {
+      automationModule = await import("../../automation/src/index.js" as any);
+    }
     return automationModule;
   } catch {
     // Automation extension not available
@@ -29,7 +34,7 @@ async function loadAutomation() {
 }
 
 async function fireAutomationEvent(
-  eventFn: (mod: typeof import("../../automation/src/index.js")) => import("../../automation/src/index.js").AutomationEvent
+  eventFn: (mod: typeof import("../../automation/dist/index.js")) => import("../../automation/dist/index.js").AutomationEvent
 ) {
   try {
     const mod = await loadAutomation();
@@ -41,6 +46,59 @@ async function fireAutomationEvent(
     // Don't let automation failures break the goal loop
     console.error("[goal-loop] Automation event failed:", err);
   }
+}
+
+async function recordGoalLearning(goal: GoalState, outcome: "completed" | "failed" | "stalled") {
+  try {
+    const mod = await loadAutomation();
+    if (mod?.recordLearning) {
+      const duration = Date.now() - (goal.usage.startedAtMs || Date.now());
+      const score = goal.lastEvaluation?.progressScore ?? 0;
+
+      // Extract what worked/failed from evaluation
+      const whatWorked: string[] = [];
+      const whatFailed: string[] = [];
+
+      if (goal.lastEvaluation?.criteriaStatus) {
+        for (const cs of goal.lastEvaluation.criteriaStatus) {
+          if (cs.met) {
+            whatWorked.push(cs.criterion);
+          } else {
+            whatFailed.push(cs.criterion);
+          }
+        }
+      }
+
+      mod.recordLearning({
+        id: goal.id,
+        goal: goal.goal,
+        outcome,
+        score,
+        iterations: goal.usage.iterations,
+        durationMs: duration,
+        tokensUsed: goal.usage.totalTokens,
+        whatWorked,
+        whatFailed,
+        suggestions: goal.lastEvaluation?.suggestedNextAction
+          ? [goal.lastEvaluation.suggestedNextAction]
+          : [],
+      });
+    }
+  } catch (err) {
+    console.error("[goal-loop] Failed to record learning:", err);
+  }
+}
+
+async function getLearningContext(goalText: string): Promise<string | null> {
+  try {
+    const mod = await loadAutomation();
+    if (mod?.generateLearningContext) {
+      return mod.generateLearningContext(goalText);
+    }
+  } catch {
+    // Ignore errors
+  }
+  return null;
 }
 
 type Logger = {
@@ -186,6 +244,8 @@ export async function runGoalLoop(params: {
       }
       // Fire automation event: goal.failed
       await fireAutomationEvent((mod) => mod.events.goalFailed(goal.id, goal.goal, goal.stopReason));
+      // Record learning for future goals
+      await recordGoalLearning(goal, "failed");
     }
   } finally {
     activeLoops.delete(goal.id);
@@ -408,6 +468,8 @@ async function loopBody(
         await fireAutomationEvent((mod) =>
           mod.events.goalCompleted(goal.id, goal.goal, evalResult.progressScore, duration)
         );
+        // Record learning for future goals
+        await recordGoalLearning(goal, "completed");
         return;
       }
       if (!evalResult.shouldContinue) {
@@ -425,6 +487,8 @@ async function loopBody(
         await fireAutomationEvent((mod) =>
           mod.events.goalFailed(goal.id, goal.goal, evalResult.assessment)
         );
+        // Record learning for future goals
+        await recordGoalLearning(goal, "failed");
         return;
       }
 
@@ -450,6 +514,8 @@ async function loopBody(
         await fireAutomationEvent((mod) =>
           mod.events.goalStalled(goal.id, goal.goal, lastScore)
         );
+        // Record learning for future goals
+        await recordGoalLearning(goal, "stalled");
         return;
       }
 
