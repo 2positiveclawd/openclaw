@@ -267,7 +267,7 @@ const researcherPlugin = {
     });
 
     // -------------------------------------------------------------------
-    // 4. Register HTTP route
+    // 4. Register HTTP routes
     // -------------------------------------------------------------------
     api.registerHttpRoute({
       path: "/researcher/status",
@@ -291,6 +291,118 @@ const researcherPlugin = {
         };
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify(payload));
+      },
+    });
+
+    // POST /researcher/answer - Submit interview answers
+    api.registerHttpRoute({
+      path: "/researcher/answer",
+      handler: async (req, res) => {
+        if (req.method !== "POST") {
+          res.writeHead(405, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Method not allowed" }));
+          return;
+        }
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          const { researchId, answer } = body;
+
+          if (!researchId || !answer) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Missing researchId or answer" }));
+            return;
+          }
+
+          const resolved = resolveUserInput(researchId, answer);
+          if (resolved) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, message: "Answer submitted" }));
+            return;
+          }
+
+          const research = readResearch(researchId);
+          if (!research) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: `Research ${researchId} not found` }));
+            return;
+          }
+          if (research.status !== "interviewing") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({
+                ok: false,
+                error: `Research ${researchId} is not waiting for input (status: ${research.status})`,
+              }),
+            );
+            return;
+          }
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(
+            JSON.stringify({ ok: false, error: `Research ${researchId} is not currently waiting for a reply` }),
+          );
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        }
+      },
+    });
+
+    // POST /researcher/go - Launch plan from PRD
+    api.registerHttpRoute({
+      path: "/researcher/go",
+      handler: async (req, res) => {
+        if (req.method !== "POST") {
+          res.writeHead(405, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: "Method not allowed" }));
+          return;
+        }
+        try {
+          const chunks: Buffer[] = [];
+          for await (const chunk of req) chunks.push(chunk);
+          const body = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+          const { researchId } = body;
+
+          if (!researchId) {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: "Missing researchId" }));
+            return;
+          }
+
+          const resolved = resolveGo(researchId);
+          if (resolved) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: true, message: "Plan launch initiated" }));
+            return;
+          }
+
+          const research = readResearch(researchId);
+          if (!research) {
+            res.writeHead(404, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ ok: false, error: `Research ${researchId} not found` }));
+            return;
+          }
+          if (research.status === "launched") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({ ok: false, error: `Research already launched plan ${research.launchedPlanId}` }),
+            );
+            return;
+          }
+          if (research.status !== "ready") {
+            res.writeHead(400, { "Content-Type": "application/json" });
+            res.end(
+              JSON.stringify({ ok: false, error: `Research ${researchId} is not ready (status: ${research.status})` }),
+            );
+            return;
+          }
+          res.writeHead(400, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: `Research ${researchId} is not waiting for a go signal` }));
+        } catch (err) {
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+        }
       },
     });
 

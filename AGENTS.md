@@ -3,6 +3,10 @@
 - Repo: https://github.com/openclaw/openclaw
 - GitHub issues/comments/PR comments: use literal multiline strings or `-F - <<'EOF'` (or $'...') for real newlines; never embed "\\n".
 
+## Pending PRs (local untracked code — reapply after `git pull` until merged)
+
+- **goal-loop extension** (`extensions/goal-loop/`): Autonomous goal-directed agent loops with budget controls, progress evaluation, and governance. Untracked — not yet in upstream. If `git pull` wipes the working tree, the extension source lives in this branch/PR. The companion agent skill lives externally at `~/.openclaw/extensions/goal-skill/` and is unaffected by pulls.
+
 ## Project Structure & Module Organization
 
 - Source code: `src/` (CLI wiring in `src/cli`, commands in `src/commands`, web provider in `src/provider-web.ts`, infra in `src/infra`, media pipeline in `src/media`).
