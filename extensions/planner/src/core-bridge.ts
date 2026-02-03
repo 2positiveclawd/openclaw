@@ -2,15 +2,20 @@
 // Planner – Core Bridge
 // ---------------------------------------------------------------------------
 //
-// Dynamic imports from the OpenClaw core dist directory. Copied and adapted
-// from the goal-loop extension's core-bridge.ts.
+// Imports from openclaw/plugin-sdk for extension-to-core communication.
 
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  runCronIsolatedAgentTurn,
+  loadProviderUsageSummary,
+  deliverOutboundPayloads,
+  createDefaultDeps,
+  type RunCronAgentTurnResult,
+  type OutboundDeliveryResult,
+  type CliDeps,
+} from "openclaw/plugin-sdk";
 
 // ---------------------------------------------------------------------------
-// Core type stubs (minimal surface we use)
+// Re-export types for extension use
 // ---------------------------------------------------------------------------
 
 export type CoreConfig = Record<string, unknown>;
@@ -32,12 +37,7 @@ export type CoreCronJob = {
   state: Record<string, unknown>;
 };
 
-export type CoreRunCronAgentTurnResult = {
-  status: "ok" | "error" | "skipped";
-  summary?: string;
-  outputText?: string;
-  error?: string;
-};
+export type CoreRunCronAgentTurnResult = RunCronAgentTurnResult;
 
 export type CoreUsageSummary = {
   updatedAt: number;
@@ -49,136 +49,32 @@ export type CoreUsageSummary = {
   }>;
 };
 
-export type CoreOutboundDeliveryResult = {
-  channel: string;
-  messageId: string;
-  [key: string]: unknown;
-};
+export type CoreOutboundDeliveryResult = OutboundDeliveryResult;
 
-export type CoreCliDeps = Record<string, unknown>;
+export type CoreCliDeps = CliDeps;
 
 // ---------------------------------------------------------------------------
-// Core module resolution
-// ---------------------------------------------------------------------------
-
-let coreRootCache: string | null = null;
-
-function findPackageRoot(startDir: string, name: string): string | null {
-  let dir = startDir;
-  for (;;) {
-    const pkgPath = path.join(dir, "package.json");
-    try {
-      if (fs.existsSync(pkgPath)) {
-        const raw = fs.readFileSync(pkgPath, "utf8");
-        const pkg = JSON.parse(raw) as { name?: string };
-        if (pkg.name === name) return dir;
-      }
-    } catch {
-      // keep walking
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-function resolveOpenClawRoot(): string {
-  if (coreRootCache) return coreRootCache;
-
-  const override = process.env.OPENCLAW_ROOT?.trim();
-  if (override) {
-    coreRootCache = override;
-    return override;
-  }
-
-  const candidates = new Set<string>();
-  if (process.argv[1]) candidates.add(path.dirname(process.argv[1]));
-  candidates.add(process.cwd());
-  try {
-    const urlPath = fileURLToPath(import.meta.url);
-    candidates.add(path.dirname(urlPath));
-  } catch {
-    // ignore
-  }
-
-  for (const start of candidates) {
-    const found = findPackageRoot(start, "openclaw");
-    if (found) {
-      coreRootCache = found;
-      return found;
-    }
-  }
-
-  throw new Error("Unable to resolve OpenClaw core root. Set OPENCLAW_ROOT.");
-}
-
-async function importCoreModule<T>(relativePath: string): Promise<T> {
-  const root = resolveOpenClawRoot();
-  const distPath = path.join(root, "dist", relativePath);
-  if (!fs.existsSync(distPath)) {
-    throw new Error(`Missing core module at ${distPath}. Run \`pnpm build\`.`);
-  }
-  return (await import(pathToFileURL(distPath).href)) as T;
-}
-
-// ---------------------------------------------------------------------------
-// Lazy-loaded core deps
+// Core deps interface
 // ---------------------------------------------------------------------------
 
 export type CoreDeps = {
-  runCronIsolatedAgentTurn: (params: {
-    cfg: CoreConfig;
-    deps: CoreCliDeps;
-    job: CoreCronJob;
-    message: string;
-    sessionKey: string;
-    agentId?: string;
-    lane?: string;
-  }) => Promise<CoreRunCronAgentTurnResult>;
-
-  loadProviderUsageSummary: (opts?: Record<string, unknown>) => Promise<CoreUsageSummary>;
-
-  deliverOutboundPayloads: (params: {
-    cfg: CoreConfig;
-    channel: string;
-    to: string;
-    accountId?: string;
-    payloads: Array<{ text?: string; mediaUrl?: string }>;
-    bestEffort?: boolean;
-    deps?: CoreCliDeps;
-  }) => Promise<CoreOutboundDeliveryResult[]>;
-
-  createDefaultDeps: () => CoreCliDeps;
+  runCronIsolatedAgentTurn: typeof runCronIsolatedAgentTurn;
+  loadProviderUsageSummary: typeof loadProviderUsageSummary;
+  deliverOutboundPayloads: typeof deliverOutboundPayloads;
+  createDefaultDeps: typeof createDefaultDeps;
 };
 
-let coreDepsPromise: Promise<CoreDeps> | null = null;
+// ---------------------------------------------------------------------------
+// Load core deps (now synchronous since we use static imports)
+// ---------------------------------------------------------------------------
+
+const coreDeps: CoreDeps = {
+  runCronIsolatedAgentTurn,
+  loadProviderUsageSummary,
+  deliverOutboundPayloads,
+  createDefaultDeps,
+};
 
 export async function loadCoreDeps(): Promise<CoreDeps> {
-  if (coreDepsPromise) return coreDepsPromise;
-
-  coreDepsPromise = (async () => {
-    const [cronRun, providerUsage, outbound, cliDeps] = await Promise.all([
-      importCoreModule<{
-        runCronIsolatedAgentTurn: CoreDeps["runCronIsolatedAgentTurn"];
-      }>("cron/isolated-agent/run.js"),
-      importCoreModule<{
-        loadProviderUsageSummary: CoreDeps["loadProviderUsageSummary"];
-      }>("infra/provider-usage.js"),
-      importCoreModule<{
-        deliverOutboundPayloads: CoreDeps["deliverOutboundPayloads"];
-      }>("infra/outbound/deliver.js"),
-      importCoreModule<{
-        createDefaultDeps: CoreDeps["createDefaultDeps"];
-      }>("cli/deps.js"),
-    ]);
-
-    return {
-      runCronIsolatedAgentTurn: cronRun.runCronIsolatedAgentTurn,
-      loadProviderUsageSummary: providerUsage.loadProviderUsageSummary,
-      deliverOutboundPayloads: outbound.deliverOutboundPayloads,
-      createDefaultDeps: cliDeps.createDefaultDeps,
-    };
-  })();
-
-  return coreDepsPromise;
+  return coreDeps;
 }

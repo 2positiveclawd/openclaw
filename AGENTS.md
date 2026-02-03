@@ -4,11 +4,11 @@
 
 ## GitHub Repositories
 
-| Repo | Purpose | Branch |
-|------|---------|--------|
-| `2positiveclawd/openclaw` | Fork with extensions (goal-loop, planner, trend-scout) | `main` |
-| `2positiveclawd/snake-game` | Deployed game demo | `main` |
-| `~/projects/openclawd-dashboard` | Local dashboard (NOT on Vercel) | `main` |
+| Repo                             | Purpose                                                | Branch |
+| -------------------------------- | ------------------------------------------------------ | ------ |
+| `2positiveclawd/openclaw`        | Fork with extensions (goal-loop, planner, trend-scout) | `main` |
+| `2positiveclawd/snake-game`      | Deployed game demo                                     | `main` |
+| `~/projects/openclawd-dashboard` | Local dashboard (NOT on Vercel)                        | `main` |
 
 ## Runtime: Systemd (Active)
 
@@ -33,15 +33,16 @@ Docker mounts `~/.openclaw` at same path for config compatibility.
 
 ## Security Posture
 
-| Layer | Setting | Status |
-|-------|---------|--------|
-| Gateway binding | `loopback` | ✅ Local only |
-| Gateway auth | Token required | ✅ Active |
-| Discord policy | `allowlist` | ✅ Restricted |
-| Browser sandbox | `noSandbox: false` | ✅ Enabled |
-| Secrets | Separate file, 600 perms | ✅ Isolated |
+| Layer           | Setting                  | Status        |
+| --------------- | ------------------------ | ------------- |
+| Gateway binding | `loopback`               | ✅ Local only |
+| Gateway auth    | Token required           | ✅ Active     |
+| Discord policy  | `allowlist`              | ✅ Restricted |
+| Browser sandbox | `noSandbox: false`       | ✅ Enabled    |
+| Secrets         | Separate file, 600 perms | ✅ Isolated   |
 
 **Secrets location:** `~/.openclaw/.secrets.env`
+
 ```
 AZURE_OPENAI_API_KEY, DISCORD_BOT_TOKEN, NOTION_API_KEY,
 OPENCLAW_GATEWAY_TOKEN, REDDIT_CLIENT_SECRET
@@ -49,26 +50,27 @@ OPENCLAW_GATEWAY_TOKEN, REDDIT_CLIENT_SECRET
 
 ## Agent Capabilities (Discord bot)
 
-| Tool | Capability | Isolation |
-|------|------------|-----------|
-| `exec` | Shell commands | Container if Docker, host if systemd |
-| `read/write` | File access | `~/.openclaw/workspace*` only |
-| `browser` | Puppeteer/Chrome | Sandboxed |
-| `git` | Version control | Workspace scoped |
+| Tool         | Capability       | Isolation                            |
+| ------------ | ---------------- | ------------------------------------ |
+| `exec`       | Shell commands   | Container if Docker, host if systemd |
+| `read/write` | File access      | `~/.openclaw/workspace*` only        |
+| `browser`    | Puppeteer/Chrome | Sandboxed                            |
+| `git`        | Version control  | Workspace scoped                     |
 
 **Workspaces:**
+
 - `~/.openclaw/workspace/` — Main (committed to git)
 - `~/.openclaw/workspace-{travel,researcher,executor}/` — Subagents
 
 ## Data Persistence
 
-| Data | Location | In Git? |
-|------|----------|---------|
-| Agent workspace | `~/.openclaw/workspace/` | ✅ Yes |
-| Goal-loop state | `~/.openclaw/goal-loop/goals.json` | ❌ No |
-| Planner state | `~/.openclaw/planner/plans.json` | ❌ No |
-| Config | `~/.openclaw/openclaw.json` | ❌ No (has secrets) |
-| Dashboard | `~/projects/openclawd-dashboard/` | ✅ Local git |
+| Data            | Location                           | In Git?             |
+| --------------- | ---------------------------------- | ------------------- |
+| Agent workspace | `~/.openclaw/workspace/`           | ✅ Yes              |
+| Goal-loop state | `~/.openclaw/goal-loop/goals.json` | ❌ No               |
+| Planner state   | `~/.openclaw/planner/plans.json`   | ❌ No               |
+| Config          | `~/.openclaw/openclaw.json`        | ❌ No (has secrets) |
+| Dashboard       | `~/projects/openclawd-dashboard/`  | ✅ Local git        |
 
 ## Backup (Disabled, Available)
 
@@ -83,6 +85,7 @@ Not running — only needed if using WhatsApp/Signal (browser sessions).
 - Deploy dashboard to Vercel — local only
 
 **Safe alternatives:**
+
 ```bash
 # Goal status
 cat ~/.openclaw/goal-loop/goals.json | jq '.goals[-1]'
@@ -101,6 +104,43 @@ timeout 5 openclaw goal list 2>&1
 ## Pending PRs (local untracked code — reapply after `git pull` until merged)
 
 - **goal-loop extension** (`extensions/goal-loop/`): Autonomous goal-directed agent loops with budget controls, progress evaluation, and governance. Untracked — not yet in upstream. If `git pull` wipes the working tree, the extension source lives in this branch/PR. The companion agent skill lives externally at `~/.openclaw/extensions/goal-skill/` and is unaffected by pulls.
+
+## Local Fork Patches (reapply after upstream merge conflicts)
+
+> **Full documentation:** See `docs/fork/LOCAL-PATCHES.md` for detailed instructions on applying patches after merge conflicts.
+
+These are minimal patches we maintain locally. If `git pull` causes conflicts in these files, reapply the patches described below.
+
+### Plugin-SDK Extension Bridge Exports
+
+**File:** `src/plugin-sdk/index.ts`
+
+**Why:** The goal-loop, planner, and researcher extensions need to import core functions. Rather than using fragile dynamic imports from `dist/` paths (which break when the build config changes), we export them through the stable plugin-sdk API.
+
+**Patch:** Add these lines at the end of `src/plugin-sdk/index.ts`:
+
+```ts
+// Extension bridge (for goal-loop, planner, researcher extensions)
+export {
+  runCronIsolatedAgentTurn,
+  type RunCronAgentTurnResult,
+} from "../cron/isolated-agent/run.js";
+export { loadProviderUsageSummary } from "../infra/provider-usage.load.js";
+export { deliverOutboundPayloads, type OutboundDeliveryResult } from "../infra/outbound/deliver.js";
+export { createDefaultDeps, type CliDeps } from "../cli/deps.js";
+```
+
+### Extension Core-Bridge Files
+
+**Files:**
+
+- `extensions/goal-loop/src/core-bridge.ts`
+- `extensions/planner/src/core-bridge.ts`
+- `extensions/researcher/src/core-bridge.ts`
+
+**Why:** These files originally used `importCoreModule()` to dynamically load from `dist/` paths. This broke when those paths weren't built as separate entry points. The fix is to import from `openclaw/plugin-sdk` instead.
+
+**Patch:** Replace the entire `core-bridge.ts` in each extension with the simplified version that imports from `openclaw/plugin-sdk`. See current files for the template (they're identical except for the header comment).
 
 ## Project Structure & Module Organization
 
