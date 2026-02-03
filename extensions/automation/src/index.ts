@@ -23,6 +23,7 @@ import type { AutomationEvent, EventType } from "./types.js";
 import { fireWebhooks, testWebhook } from "./webhooks.js";
 import { evaluateChains } from "./chains.js";
 import { loadWebhooks, loadChains, loadTemplates, getTemplate } from "./config.js";
+import { notifyDiscord, saveDiscordConfig, getDiscordConfig } from "./discord.js";
 
 // Re-export types
 export type {
@@ -45,25 +46,34 @@ export { fireWebhooks, testWebhook };
 // Re-export chain functions
 export { evaluateChains };
 
+// Re-export Discord functions
+export { notifyDiscord, saveDiscordConfig, getDiscordConfig };
+
 /**
  * Fire an automation event
  *
  * This is the main entry point for plugins to trigger automation.
  * It will:
- * 1. Fire all matching webhooks
- * 2. Evaluate and execute all matching chains
+ * 1. Send Discord notification (if configured)
+ * 2. Fire all matching webhooks
+ * 3. Evaluate and execute all matching chains
  *
  * @param event - The event to fire
  * @returns Summary of what was triggered
  */
 export async function fireEvent(event: AutomationEvent): Promise<{
+  discordNotified: boolean;
   webhooksTriggered: string[];
   chainsTriggered: string[];
 }> {
   console.log(`[automation] Event fired: ${event.type} (id: ${event.data.id})`);
 
-  // Fire webhooks and chains in parallel
-  const [webhooksTriggered, chainsTriggered] = await Promise.all([
+  // Fire Discord, webhooks, and chains in parallel
+  const [discordNotified, webhooksTriggered, chainsTriggered] = await Promise.all([
+    notifyDiscord(event).catch((err) => {
+      console.error("[automation] Error sending Discord notification:", err);
+      return false;
+    }),
     fireWebhooks(event).catch((err) => {
       console.error("[automation] Error firing webhooks:", err);
       return [] as string[];
@@ -74,7 +84,7 @@ export async function fireEvent(event: AutomationEvent): Promise<{
     }),
   ]);
 
-  return { webhooksTriggered, chainsTriggered };
+  return { discordNotified, webhooksTriggered, chainsTriggered };
 }
 
 /**
