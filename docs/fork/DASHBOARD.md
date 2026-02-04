@@ -16,24 +16,24 @@ npm run dev
 
 ## Pages
 
-| Route          | Page           | Description                                                        |
-| -------------- | -------------- | ------------------------------------------------------------------ |
-| `/command`     | Command Center | Unified Kanban board for all missions (goals, plans, research)     |
-| `/`            | (redirect)     | Redirects to `/command`                                            |
-| `/goals`       | (redirect)     | Redirects to `/command?type=goal`                                  |
-| `/goals/[id]`  | Goal Detail    | Iteration timeline, evaluation history, criteria status            |
-| `/plans`       | (redirect)     | Redirects to `/command?type=plan`                                  |
-| `/plans/[id]`  | Plan Detail    | Task Kanban board, DAG visualization, budget gauges, phase stepper |
-| `/research`    | (redirect)     | Redirects to `/command?type=research`                              |
-| `/prds`        | PRDs           | Product Requirement Documents rendered as markdown                 |
-| `/agents`      | Agents         | Agent list, workspace info, session stats, SOUL.md viewer          |
-| `/agents/[id]` | Agent Detail   | Full agent config, binding info, workspace files                   |
-| `/analytics`   | Analytics      | Daily usage charts, cost breakdown, performance metrics            |
-| `/automation`  | Automation     | Templates, webhooks, chained execution rules                       |
-| `/cron`        | Cron           | Scheduled jobs, enable/disable toggle, next run times              |
-| `/system`      | System         | Gateway config, plugin status, registered agents                   |
-| `/security`    | Security       | Security settings, allowlists, policy review                       |
-| `/trends`      | Trends         | Trend tracking and analysis (if trend-scout enabled)               |
+| Route          | Page           | Description                                                         |
+| -------------- | -------------- | ------------------------------------------------------------------- |
+| `/command`     | Command Center | Unified Kanban board for all missions (goals, plans, research)      |
+| `/`            | (redirect)     | Redirects to `/command`                                             |
+| `/goals`       | (redirect)     | Redirects to `/command?type=goal`                                   |
+| `/goals/[id]`  | Goal Detail    | Iteration timeline, evaluation history, criteria status             |
+| `/plans`       | (redirect)     | Redirects to `/command?type=plan`                                   |
+| `/plans/[id]`  | Plan Detail    | Task Kanban board, DAG visualization, budget gauges, phase stepper  |
+| `/research`    | (redirect)     | Redirects to `/command?type=research`                               |
+| `/prds`        | PRDs           | Product Requirement Documents rendered as markdown                  |
+| `/agents`      | Agents         | Agent list, workspace info, session stats, SOUL.md viewer           |
+| `/agents/[id]` | Agent Detail   | Full agent config, binding info, workspace files, recent tool calls |
+| `/analytics`   | Analytics      | Daily usage charts, cost breakdown, performance metrics             |
+| `/automation`  | Automation     | Templates, webhooks, chained execution rules                        |
+| `/cron`        | Cron           | Scheduled jobs, enable/disable toggle, next run times               |
+| `/system`      | System         | Gateway config, plugin status, registered agents                    |
+| `/security`    | Security       | Security settings, allowlists, policy review                        |
+| `/trends`      | Trends         | Trend tracking and analysis (if trend-scout enabled)                |
 
 ## Features
 

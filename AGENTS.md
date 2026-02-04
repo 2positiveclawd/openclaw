@@ -27,6 +27,57 @@ The local-first dashboard at `~/projects/openclawd-dashboard` provides monitorin
 
 **Agent requirement:** When making changes to the dashboard, update `docs/fork/DASHBOARD.md` to reflect those changes. Keep the doc in sync with the actual dashboard features.
 
+## Agent Architecture
+
+**Full documentation:** See `docs/fork/AGENTS-GUIDE.md`
+
+Each agent has independent context with isolated sessions and workspaces:
+
+| Component | Location                                             |
+| --------- | ---------------------------------------------------- |
+| Config    | `~/.openclaw/openclaw.json` (agents.list + bindings) |
+| Sessions  | `~/.openclaw/agents/{agent-id}/sessions/*.jsonl`     |
+| Workspace | `~/.openclaw/workspace-{agent-id}/`                  |
+| Soul      | `{workspace}/SOUL.md`                                |
+
+### Current Agents (24 total)
+
+**System agents:** main, travel, researcher, executor, qa, planner
+
+**Agent Packs (18 agents):**
+| Pack | Agents |
+|------|--------|
+| Content Creator | mia-strategist, blake-scriptwriter, jordan-social |
+| Dev Team | marcus-techlead, elena-reviewer, sam-docs |
+| Solopreneur | claire-assistant, leo-researcher, harper-outreach |
+| Fitness Training | noah-coach, nina-nutrition, ethan-accountability |
+| Health & Wellness | olivia-wellness, mason-sleep, priya-habits |
+| Finance & Taxes | sophia-invoices, liam-expenses, nora-tax |
+
+### Creating New Agents
+
+Two approaches:
+
+1. **Agent Packs** (recommended for teams) — Define in `extensions/agent-packs/src/packs-registry.ts`
+2. **Standalone** — Add directly to `~/.openclaw/openclaw.json`
+
+Quick standalone setup:
+
+```bash
+# 1. Create directories
+mkdir -p ~/.openclaw/agents/my-agent/sessions
+mkdir -p ~/.openclaw/workspace-my-agent
+
+# 2. Create SOUL.md
+echo "# MyAgent\nYou are MyAgent..." > ~/.openclaw/workspace-my-agent/SOUL.md
+
+# 3. Add to config (agents.list + bindings)
+# 4. Restart gateway
+systemctl --user restart openclaw-gateway
+```
+
+See `docs/fork/AGENTS-GUIDE.md` for complete instructions.
+
 ## Runtime: Systemd (Active)
 
 ```
