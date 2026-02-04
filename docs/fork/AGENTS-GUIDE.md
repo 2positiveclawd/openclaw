@@ -262,6 +262,32 @@ systemctl --user restart openclaw-gateway
 
 ---
 
+## Ack Reactions (Visual Feedback)
+
+Each agent reacts with their emoji to messages **BEFORE** processing starts. This gives immediate visual feedback that the correct agent is handling the request.
+
+Configure in `~/.openclaw/openclaw.json`:
+
+```json5
+{
+  messages: {
+    ackReactionScope: "group-mentions", // React in group channels when mentioned
+    removeAckAfterReply: false, // Keep the reaction after responding
+  },
+}
+```
+
+The agent's emoji comes from their `identity.emoji` field. When a user sends a message:
+
+1. Agent receives the message
+2. Agent immediately reacts with their emoji (e.g., 📋 for Mia)
+3. Agent starts typing/thinking
+4. Agent sends response
+
+This helps users know which agent is handling their request, especially useful when multiple agents are available.
+
+---
+
 ## Configuration Reference
 
 ### Agent Definition
@@ -424,6 +450,31 @@ Visit `http://localhost:3000/agents/your-agent` to see:
 | Fitness Training  | noah-coach, nina-nutrition, ethan-accountability  |
 | Health & Wellness | olivia-wellness, mason-sleep, priya-habits        |
 | Finance & Taxes   | sophia-invoices, liam-expenses, nora-tax          |
+
+### Discord Channel Reference
+
+Each pack has its own Discord category with channels for each agent:
+
+| Pack                  | Category ID           | Agent                | Channel ID            | Emoji |
+| --------------------- | --------------------- | -------------------- | --------------------- | ----- |
+| **Content Creator**   | `1468554234088652802` | mia-strategist       | `1468554279093669888` | 📋    |
+|                       |                       | blake-scriptwriter   | `1468554280414875700` | 🎬    |
+|                       |                       | jordan-social        | `1468554281585213561` | 📱    |
+| **Dev Team**          | `1468554337339838587` | marcus-techlead      | `1468554339449573521` | 🏗️    |
+|                       |                       | elena-reviewer       | `1468554340783362151` | 🔍    |
+|                       |                       | sam-docs             | `1468554342746427392` | 📚    |
+| **Solopreneur**       | `1468554344268959826` | claire-assistant     | `1468554345468399738` | 📅    |
+|                       |                       | leo-researcher       | `1468554347662020680` | 🔬    |
+|                       |                       | harper-outreach      | `1468554348639555585` | ✉️    |
+| **Fitness Training**  | `1468554427538473170` | noah-coach           | `1468554428670808066` | 💪    |
+|                       |                       | nina-nutrition       | `1468554430138945580` | 🥗    |
+|                       |                       | ethan-accountability | `1468554431363678343` | ✅    |
+| **Health & Wellness** | `1468554432214990932` | olivia-wellness      | `1468554433242857671` | 🧘    |
+|                       |                       | mason-sleep          | `1468554434538766398` | 😴    |
+|                       |                       | priya-habits         | `1468554435553660939` | 🎯    |
+| **Finance & Taxes**   | `1468554436636049509` | sophia-invoices      | `1468554437856464896` | 💵    |
+|                       |                       | liam-expenses        | `1468554439173607651` | 🧾    |
+|                       |                       | nora-tax             | `1468554440582893599` | 📊    |
 
 ---
 
