@@ -16,25 +16,54 @@ npm run dev
 
 ## Pages
 
-| Route          | Page         | Description                                                               |
-| -------------- | ------------ | ------------------------------------------------------------------------- |
-| `/`            | Dashboard    | Overview cards: Goals, Plans, Research, PRDs, Cron, System, Quick Actions |
-| `/goals`       | Goals        | Goal-loop progress, scores, criteria checklists, evaluation history       |
-| `/goals/[id]`  | Goal Detail  | Iteration timeline, evaluation history, criteria status                   |
-| `/plans`       | Plans        | Planner orchestration: list with status badges, task stats                |
-| `/plans/[id]`  | Plan Detail  | Kanban board, DAG visualization, budget gauges, phase stepper             |
-| `/research`    | Research     | Research sessions, interview Q&A, PRD preview, plan launch                |
-| `/prds`        | PRDs         | Product Requirement Documents rendered as markdown                        |
-| `/agents`      | Agents       | Agent list, workspace info, session stats, SOUL.md viewer                 |
-| `/agents/[id]` | Agent Detail | Full agent config, binding info, workspace files                          |
-| `/analytics`   | Analytics    | Daily usage charts, cost breakdown, performance metrics                   |
-| `/automation`  | Automation   | Templates, webhooks, chained execution rules                              |
-| `/cron`        | Cron         | Scheduled jobs, enable/disable toggle, next run times                     |
-| `/system`      | System       | Gateway config, plugin status, registered agents                          |
-| `/security`    | Security     | Security settings, allowlists, policy review                              |
-| `/trends`      | Trends       | Trend tracking and analysis (if trend-scout enabled)                      |
+| Route          | Page           | Description                                                        |
+| -------------- | -------------- | ------------------------------------------------------------------ |
+| `/command`     | Command Center | Unified Kanban board for all missions (goals, plans, research)     |
+| `/`            | (redirect)     | Redirects to `/command`                                            |
+| `/goals`       | (redirect)     | Redirects to `/command?type=goal`                                  |
+| `/goals/[id]`  | Goal Detail    | Iteration timeline, evaluation history, criteria status            |
+| `/plans`       | (redirect)     | Redirects to `/command?type=plan`                                  |
+| `/plans/[id]`  | Plan Detail    | Task Kanban board, DAG visualization, budget gauges, phase stepper |
+| `/research`    | (redirect)     | Redirects to `/command?type=research`                              |
+| `/prds`        | PRDs           | Product Requirement Documents rendered as markdown                 |
+| `/agents`      | Agents         | Agent list, workspace info, session stats, SOUL.md viewer          |
+| `/agents/[id]` | Agent Detail   | Full agent config, binding info, workspace files                   |
+| `/analytics`   | Analytics      | Daily usage charts, cost breakdown, performance metrics            |
+| `/automation`  | Automation     | Templates, webhooks, chained execution rules                       |
+| `/cron`        | Cron           | Scheduled jobs, enable/disable toggle, next run times              |
+| `/system`      | System         | Gateway config, plugin status, registered agents                   |
+| `/security`    | Security       | Security settings, allowlists, policy review                       |
+| `/trends`      | Trends         | Trend tracking and analysis (if trend-scout enabled)               |
 
 ## Features
+
+### Command Center (Kanban)
+
+The `/command` page is the unified mission control for all agent operations:
+
+- **5-Column Kanban:** Backlog | Active | Review | Done | Failed
+- **Mission Types:** Goals, Plans, Research unified as "Missions"
+- **Status Mapping:**
+  - `running`, `planning`, `executing`, `researching`, `synthesizing` → **Active**
+  - `interviewing`, `ready` → **Review** (awaiting input)
+  - `completed`, `done`, `launched` → **Done**
+  - `failed`, `budget_exceeded` → **Failed**
+  - `stopped` → **Backlog** (resumable)
+- **Agent Queues Sidebar:** Shows each agent's assigned work
+- **Activity Feed:** Collapsible timeline of recent events
+- **Type Filter:** Toggle between All / Goals / Plans / Research
+- **Auto-refresh:** 5-second polling when active missions exist
+- **Priority Badges:** Critical (errors), High (running/low score), Medium, Low
+
+Each mission card shows:
+
+- Type icon and ID
+- Title (truncated)
+- Progress bar
+- Priority badge
+- Score (if available)
+- Error indicator
+- Time since update
 
 ### Interactive Controls
 
@@ -69,18 +98,15 @@ When a research session is in "interviewing" phase, an inline form appears to su
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action              |
-| -------- | ------------------- |
-| `g h`    | Go to Dashboard     |
-| `g g`    | Go to Goals         |
-| `g p`    | Go to Plans         |
-| `g r`    | Go to Research      |
-| `g a`    | Go to Analytics     |
-| `g s`    | Go to System        |
-| `g t`    | Go to Agents        |
-| `g u`    | Go to Automation    |
-| `/`      | Open search         |
-| `?`      | Show shortcuts help |
+| Shortcut | Action               |
+| -------- | -------------------- |
+| `g c`    | Go to Command Center |
+| `g a`    | Go to Analytics      |
+| `g s`    | Go to System         |
+| `g t`    | Go to Agents         |
+| `g u`    | Go to Automation     |
+| `/`      | Open search          |
+| `?`      | Show shortcuts help  |
 
 ## Data Sources
 
