@@ -16,12 +16,14 @@
 
 The local-first dashboard at `~/projects/openclawd-dashboard` provides monitoring and control for all agent execution. Key pages:
 
-- `/` — Overview with quick actions
-- `/goals` — Goal-loop monitoring, start/stop/resume
-- `/plans` — Planner kanban, DAG, budget gauges
-- `/research` — Research sessions, interview Q&A
+- `/command` — Unified Kanban board (goals/plans/research as "missions")
+- `/goals/[id]`, `/plans/[id]` — Detail drilldowns
+- `/agents` — Agent management, souls, tool calls
 - `/analytics` — Usage charts, cost breakdown
 - `/automation` — Templates, webhooks, chains
+- `/cron`, `/system`, `/security`, `/trends` — System pages
+
+**Redirects:** `/`, `/goals`, `/plans`, `/research` all redirect to `/command`
 
 **Run:** `cd ~/projects/openclawd-dashboard && npm run dev` → `http://localhost:3000`
 
@@ -53,6 +55,20 @@ Each agent has independent context with isolated sessions and workspaces:
 | Fitness Training | noah-coach, nina-nutrition, ethan-accountability |
 | Health & Wellness | olivia-wellness, mason-sleep, priya-habits |
 | Finance & Taxes | sophia-invoices, liam-expenses, nora-tax |
+
+### Agent Capabilities
+
+| Feature                       | Status     | Details                                            |
+| ----------------------------- | ---------- | -------------------------------------------------- |
+| **Multi-Agent Communication** | ✅ Ready   | `sessions_spawn` + `sessions_send` tools           |
+| **Persistent Memory**         | ✅ Enabled | SQLite + embeddings, per-agent isolation           |
+| **Routing**                   | Static     | 1:1 channel bindings (no intent-based routing yet) |
+
+**Multi-agent delegation:** Agents can spawn subagents via allowlists. Configure `agents[].subagents.allowAgents` in config.
+
+**Memory:** Automatically indexes `MEMORY.md` + session transcripts. Searchable via embeddings.
+
+See `docs/fork/AGENTS-GUIDE.md` for full documentation.
 
 ### Creating New Agents
 

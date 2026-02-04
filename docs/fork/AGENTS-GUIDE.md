@@ -332,6 +332,196 @@ Available tools for agents:
 
 ---
 
+## Multi-Agent Communication
+
+Agents can communicate with each other using built-in tools. This enables delegation workflows where one agent spawns another to handle a subtask.
+
+### Available Tools
+
+| Tool             | Purpose                           | Direction      |
+| ---------------- | --------------------------------- | -------------- |
+| `sessions_spawn` | Spawn a subagent to handle a task | Parent → Child |
+| `sessions_send`  | Send a message to another session | Any → Any      |
+
+### How Delegation Works
+
+1. **Parent agent** calls `sessions_spawn` with target `agentId` and task
+2. **Child agent** runs in isolation with its own session
+3. **Child completes** and automatically announces results back to parent
+4. **Parent continues** with the child's findings
+
+### Configuration: Subagent Allowlists
+
+Control which agents can spawn which in `~/.openclaw/openclaw.json`:
+
+```json5
+{
+  agents: {
+    list: [
+      {
+        id: "mia-strategist",
+        // ... other config ...
+        subagents: {
+          allowAgents: ["blake-scriptwriter", "jordan-social"],
+        },
+      },
+    ],
+  },
+}
+```
+
+With this config, Mia can delegate to Blake or Jordan, but not to other agents.
+
+### Visibility Policies
+
+- **spawned** (default): Agent can only communicate with subagents it spawned
+- **unrestricted**: Agent can message any session (use with caution)
+
+### Example: Mia Delegates to Blake
+
+```
+User → Mia: "Create a content campaign for summer sale"
+Mia (thinking): I'll handle strategy, delegate scripts to Blake
+Mia → sessions_spawn(agentId: "blake-scriptwriter", task: "Write 3 video scripts for summer sale...")
+Blake runs, writes scripts, saves to workspace
+Blake → announces results back to Mia
+Mia → User: "Here's the campaign plan with Blake's scripts attached..."
+```
+
+---
+
+## Persistent Memory
+
+Each agent has persistent memory that survives across sessions. This is enabled via vector embeddings + SQLite.
+
+### What Gets Remembered
+
+| Source             | Description                   |
+| ------------------ | ----------------------------- |
+| `MEMORY.md`        | Agent's workspace memory file |
+| `sessions/*.jsonl` | Past conversation transcripts |
+
+### Configuration
+
+Memory search is configured in `~/.openclaw/openclaw.json`:
+
+```json5
+{
+  agents: {
+    defaults: {
+      memorySearch: {
+        enabled: true,
+        sources: ["memory", "sessions"],
+        provider: "openai", // Uses Azure embeddings
+        sync: {
+          onSessionStart: true,
+          watchEnabled: true,
+          intervalMinutes: 60,
+        },
+        query: {
+          maxResults: 10,
+          minScore: 0.5,
+        },
+      },
+    },
+  },
+}
+```
+
+### How It Works
+
+1. **On session start**: Agent's memory index syncs (MEMORY.md + past sessions)
+2. **During conversation**: Agent can semantically search past context
+3. **Automatic**: No explicit "remember" command needed - indexed automatically
+
+### Memory Isolation
+
+Each agent has **isolated memory** - agents cannot search each other's memories. This preserves:
+
+- Privacy between different user contexts
+- Focused retrieval (no cross-contamination)
+- Clear boundaries between agent domains
+
+### Adding Persistent Notes
+
+Create `~/.openclaw/workspace-{agent}/MEMORY.md`:
+
+```markdown
+# Agent Memory
+
+## User Preferences
+
+- Prefers concise responses
+- Timezone: EST
+- Communication style: direct
+
+## Past Projects
+
+- Summer 2025: Launched product X
+- Q1 2026: Rebranded to Y
+
+## Important Contacts
+
+- Designer: Sarah (sarah@example.com)
+- Developer: Mike
+```
+
+This file is automatically indexed and searchable by the agent.
+
+---
+
+## Routing and Bindings
+
+Routing determines which agent handles incoming messages. Currently uses **static bindings** (1:1 channel-to-agent mapping).
+
+### How Routing Works
+
+```
+Discord message arrives
+    ↓
+Gateway checks bindings[]
+    ↓
+Find binding where match.peer.id == channel ID
+    ↓
+Route to bound agentId
+```
+
+### Binding Priority (highest to lowest)
+
+1. **Exact peer match** - Specific channel ID
+2. **Parent peer match** - Thread inherits parent channel's agent
+3. **Guild match** - Server-wide fallback
+4. **Team match** - Workspace fallback (Slack)
+5. **Account match** - Account-wide fallback
+6. **Default agent** - `main` if nothing matches
+
+### Current Limitation: No Intent-Based Routing
+
+The system does **not** have smart routing that analyzes message content to pick the right agent. Each channel is hardwired to one agent.
+
+**Example of what doesn't work:**
+
+```
+User in #general: "Help me with my taxes"
+→ Routes to whatever agent is bound to #general
+→ Does NOT auto-route to nora-tax based on intent
+```
+
+**Workaround:** Create dedicated channels per agent (which we do with agent packs).
+
+### Future: Smart Router
+
+A smart router extension could:
+
+- Analyze incoming message intent
+- Match to agent capabilities
+- Route dynamically to best-fit agent
+- Handle a single "general" channel that dispatches to specialists
+
+This is not yet implemented.
+
+---
+
 ## System Agents (Extensions)
 
 Some agents are used by extensions for automated workflows:
