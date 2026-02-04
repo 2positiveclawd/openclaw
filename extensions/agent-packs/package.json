@@ -1,0 +1,28 @@
+{
+  "name": "@openclaw/agent-packs",
+  "version": "0.1.0",
+  "description": "Pre-built AI agent teams for common workflows",
+  "files": [
+    "dist",
+    "packs"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "devDependencies": {
+    "openclaw": "workspace:*",
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "openclaw": "*"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

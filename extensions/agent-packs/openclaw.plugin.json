@@ -1,0 +1,35 @@
+{
+  "id": "agent-packs",
+  "uiHints": {
+    "enabled": {
+      "label": "Enable Agent Packs"
+    },
+    "enabledPacks": {
+      "label": "Enabled Packs",
+      "help": "Set to \"all\" or an array of pack IDs: content-creator, dev-team, solopreneur, fitness-training, health-wellness, finance-taxes"
+    },
+    "disabledPacks": {
+      "label": "Disabled Packs",
+      "help": "Array of pack IDs to disable even if listed in enabledPacks"
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "enabledPacks": {
+        "oneOf": [
+          { "type": "string", "const": "all" },
+          { "type": "array", "items": { "type": "string" } }
+        ]
+      },
+      "disabledPacks": {
+        "type": "array",
+        "items": { "type": "string" }
+      }
+    }
+  }
+}
