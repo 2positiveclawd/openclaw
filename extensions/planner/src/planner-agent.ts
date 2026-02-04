@@ -143,7 +143,9 @@ export function parsePlannerResponse(text: string): ParsedPlannerResponse | null
     const tasks = parsed.tasks
       .filter(
         (t: unknown): t is Record<string, unknown> =>
-          typeof t === "object" && t !== null && typeof (t as Record<string, unknown>).id === "string",
+          typeof t === "object" &&
+          t !== null &&
+          typeof (t as Record<string, unknown>).id === "string",
       )
       .map((t: Record<string, unknown>) => ({
         id: String(t.id),
@@ -177,9 +179,7 @@ export async function runPlannerAgent(params: {
   const { plan, coreDeps, cfg, cliDeps, logger, replan } = params;
   const startMs = Date.now();
 
-  const prompt = replan
-    ? buildReplannerPrompt(plan)
-    : buildPlannerPrompt(plan.goal, plan.criteria);
+  const prompt = replan ? buildReplannerPrompt(plan) : buildPlannerPrompt(plan.goal, plan.criteria);
 
   const job: CoreCronJob = {
     id: `planner-${replan ? "replan" : "plan"}-${plan.id}`,
@@ -204,6 +204,7 @@ export async function runPlannerAgent(params: {
       job,
       message: prompt,
       sessionKey,
+      agentId: "planner",
     });
 
     if (result.status === "error") {

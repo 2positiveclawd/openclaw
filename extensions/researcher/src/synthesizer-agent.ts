@@ -6,8 +6,8 @@
 // rounds and user interview answers.
 
 import fs from "node:fs";
-import path from "node:path";
 import os from "node:os";
+import path from "node:path";
 import type { CoreCliDeps, CoreConfig, CoreCronJob, CoreDeps } from "./core-bridge.js";
 import type { ResearchRound } from "./types.js";
 import { appendRoundLog } from "./state.js";
@@ -38,10 +38,7 @@ function formatAllRounds(rounds: ResearchRound[]): string {
     .join("\n\n");
 }
 
-export function buildSynthesizerPrompt(
-  originalGoal: string,
-  rounds: ResearchRound[],
-): string {
+export function buildSynthesizerPrompt(originalGoal: string, rounds: ResearchRound[]): string {
   return `You are a PRD writer. Generate a complete Product Requirement Document from
 the research and user interviews.
 
@@ -119,6 +116,78 @@ export function writePrdFile(goal: string, prdContent: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Research brief writing (auto-save for cross-agent knowledge sharing)
+// ---------------------------------------------------------------------------
+
+export function writeResearchBrief(params: {
+  researchId: string;
+  goal: string;
+  rounds: ResearchRound[];
+  prdPath: string;
+}): string {
+  const { researchId, goal, rounds, prdPath } = params;
+  const briefsDir = path.join(os.homedir(), ".openclaw", "workspace", "memory", "research-briefs");
+  fs.mkdirSync(briefsDir, { recursive: true });
+
+  const date = new Date().toISOString().split("T")[0];
+  const slug = generatePrdSlug(goal);
+  const filename = `${date}-${slug}.md`;
+  const filePath = path.join(briefsDir, filename);
+
+  // Extract key findings from research rounds
+  const keyFindings = rounds
+    .map((r) => {
+      // Take first 2-3 sentences from each research brief
+      const sentences = r.researchBrief
+        .split(/[.!?]+/)
+        .filter((s) => s.trim())
+        .slice(0, 3);
+      return sentences.map((s) => `- ${s.trim()}`).join("\n");
+    })
+    .join("\n");
+
+  // Extract Q&A summary
+  const qaSummary = rounds
+    .filter((r) => r.questions.length > 0 && r.answers.length > 0)
+    .map((r) => {
+      return r.questions
+        .map((q, i) => {
+          const a = r.answers[i] || "(no answer)";
+          return `- **Q:** ${q}\n  **A:** ${a}`;
+        })
+        .join("\n");
+    })
+    .join("\n\n");
+
+  const briefContent = `# Research Brief: ${goal}
+
+**Date**: ${date}
+**Research ID**: ${researchId}
+**Status**: completed
+
+## Key Findings
+
+${keyFindings || "- Research findings extracted from rounds"}
+
+## Interview Summary
+
+${qaSummary || "- No interview questions were needed"}
+
+## Recommendations
+
+See the generated PRD for detailed technical recommendations and acceptance criteria.
+
+## Related Files
+
+- **PRD**: ${prdPath}
+- **Research data**: ~/.openclaw/researcher/researches.json (id: ${researchId})
+`;
+
+  fs.writeFileSync(filePath, briefContent, "utf-8");
+  return filePath;
+}
+
+// ---------------------------------------------------------------------------
 // Run synthesizer agent turn
 // ---------------------------------------------------------------------------
 
@@ -159,6 +228,7 @@ export async function runSynthesizerAgent(params: {
       job,
       message: prompt,
       sessionKey,
+      agentId: "researcher",
     });
 
     if (result.status === "error") {

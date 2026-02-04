@@ -35,10 +35,7 @@ function formatPreviousRounds(rounds: ResearchRound[]): string {
     .join("\n\n");
 }
 
-export function buildResearchPrompt(
-  originalGoal: string,
-  previousRounds: ResearchRound[],
-): string {
+export function buildResearchPrompt(originalGoal: string, previousRounds: ResearchRound[]): string {
   return `You are a research analyst. Investigate this goal and produce a structured brief.
 
 ## Goal
@@ -94,7 +91,9 @@ export function parseResearchResponse(text: string): ParsedResearchResponse | nu
         ? (parsed.techOptions as unknown[])
             .filter(
               (t): t is Record<string, unknown> =>
-                typeof t === "object" && t !== null && typeof (t as Record<string, unknown>).name === "string",
+                typeof t === "object" &&
+                t !== null &&
+                typeof (t as Record<string, unknown>).name === "string",
             )
             .map((t) => ({
               name: String(t.name),
@@ -125,8 +124,7 @@ export async function runResearchAgent(params: {
   cliDeps: CoreCliDeps;
   logger: Logger;
 }): Promise<ParsedResearchResponse | null> {
-  const { researchId, originalGoal, previousRounds, coreDeps, cfg, cliDeps, logger } =
-    params;
+  const { researchId, originalGoal, previousRounds, coreDeps, cfg, cliDeps, logger } = params;
   const startMs = Date.now();
 
   const prompt = buildResearchPrompt(originalGoal, previousRounds);
@@ -154,6 +152,7 @@ export async function runResearchAgent(params: {
       job,
       message: prompt,
       sessionKey,
+      agentId: "researcher",
     });
 
     if (result.status === "error") {

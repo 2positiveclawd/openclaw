@@ -112,16 +112,8 @@ export async function runInterviewAgent(params: {
   cliDeps: CoreCliDeps;
   logger: Logger;
 }): Promise<ParsedInterviewResponse | null> {
-  const {
-    researchId,
-    originalGoal,
-    currentBrief,
-    previousRounds,
-    coreDeps,
-    cfg,
-    cliDeps,
-    logger,
-  } = params;
+  const { researchId, originalGoal, currentBrief, previousRounds, coreDeps, cfg, cliDeps, logger } =
+    params;
   const startMs = Date.now();
 
   const prompt = buildInterviewPrompt(originalGoal, currentBrief, previousRounds);
@@ -149,6 +141,7 @@ export async function runInterviewAgent(params: {
       job,
       message: prompt,
       sessionKey,
+      agentId: "researcher",
     });
 
     if (result.status === "error") {

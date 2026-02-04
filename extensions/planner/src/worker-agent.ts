@@ -90,6 +90,7 @@ export async function runWorkerAgent(params: {
       job,
       message: prompt,
       sessionKey,
+      agentId: "executor",
     });
 
     const durationMs = Date.now() - startMs;

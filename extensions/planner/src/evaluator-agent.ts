@@ -72,10 +72,7 @@ Rules:
 // Parse evaluator response
 // ---------------------------------------------------------------------------
 
-export function parseEvaluatorResponse(
-  text: string,
-  criteria: string[],
-): EvaluationResult {
+export function parseEvaluatorResponse(text: string, criteria: string[]): EvaluationResult {
   const jsonMatch = text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) {
     return fallbackEvaluation(criteria, "Could not extract JSON from evaluator response");
@@ -84,33 +81,23 @@ export function parseEvaluatorResponse(
   try {
     const parsed = JSON.parse(jsonMatch[0]);
     const score =
-      typeof parsed.score === "number"
-        ? Math.max(0, Math.min(100, Math.round(parsed.score)))
-        : 0;
+      typeof parsed.score === "number" ? Math.max(0, Math.min(100, Math.round(parsed.score))) : 0;
     const assessment =
       typeof parsed.assessment === "string" ? parsed.assessment : "No assessment provided";
-    const suggestions =
-      typeof parsed.suggestions === "string" ? parsed.suggestions : undefined;
+    const suggestions = typeof parsed.suggestions === "string" ? parsed.suggestions : undefined;
 
-    const criteriaStatus: EvaluationResult["criteriaStatus"] = criteria.map(
-      (criterion, i) => {
-        const status = Array.isArray(parsed.criteriaStatus)
-          ? parsed.criteriaStatus[i]
-          : undefined;
-        return {
-          criterion,
-          met: status?.met === true,
-          notes: typeof status?.notes === "string" ? status.notes : undefined,
-        };
-      },
-    );
+    const criteriaStatus: EvaluationResult["criteriaStatus"] = criteria.map((criterion, i) => {
+      const status = Array.isArray(parsed.criteriaStatus) ? parsed.criteriaStatus[i] : undefined;
+      return {
+        criterion,
+        met: status?.met === true,
+        notes: typeof status?.notes === "string" ? status.notes : undefined,
+      };
+    });
 
     return { score, assessment, criteriaStatus, suggestions };
   } catch {
-    return fallbackEvaluation(
-      criteria,
-      `Failed to parse evaluator JSON: ${text.slice(0, 200)}`,
-    );
+    return fallbackEvaluation(criteria, `Failed to parse evaluator JSON: ${text.slice(0, 200)}`);
   }
 }
 
@@ -166,6 +153,7 @@ export async function runFinalEvaluation(params: {
       job,
       message: prompt,
       sessionKey,
+      agentId: "qa",
     });
 
     if (result.status === "error") {
