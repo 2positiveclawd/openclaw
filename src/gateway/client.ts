@@ -94,7 +94,9 @@ export class GatewayClient {
   constructor(opts: GatewayClientOptions) {
     this.opts = {
       ...opts,
-      deviceIdentity: opts.deviceIdentity ?? loadOrCreateDeviceIdentity(),
+      // Use explicit undefined check: null means "skip device auth", undefined means "load default"
+      deviceIdentity:
+        opts.deviceIdentity === undefined ? loadOrCreateDeviceIdentity() : opts.deviceIdentity,
     };
   }
 
@@ -189,6 +191,9 @@ export class GatewayClient {
       ? loadDeviceAuthToken({ deviceId: this.opts.deviceIdentity.deviceId, role })?.token
       : null;
     const authToken = storedToken ?? this.opts.token ?? undefined;
+    logDebug(
+      `gateway client connect: token=${authToken ? authToken.slice(0, 8) + "..." : "none"} opts.token=${this.opts.token ? this.opts.token.slice(0, 8) + "..." : "none"}`,
+    );
     const canFallbackToShared = Boolean(storedToken && this.opts.token);
     const auth =
       authToken || this.opts.password

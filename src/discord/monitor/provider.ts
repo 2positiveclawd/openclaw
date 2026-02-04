@@ -40,6 +40,10 @@ import {
   createDiscordCommandArgFallbackButton,
   createDiscordNativeCommand,
 } from "./native-command.js";
+import {
+  createResearcherQuestionButton,
+  DiscordResearcherQuestionsHandler,
+} from "./researcher-questions.js";
 
 export type MonitorDiscordOpts = {
   token?: string;
@@ -462,6 +466,18 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     }),
   );
 
+  // Get gateway auth token for internal WebSocket connections
+  // Check config first, then fall back to environment variable (same as resolveGatewayAuth)
+  const gatewayAuth = cfg.gateway?.auth;
+  const gatewayAuthToken =
+    (typeof gatewayAuth === "object" && gatewayAuth !== null
+      ? (gatewayAuth as { token?: string }).token
+      : typeof gatewayAuth === "string"
+        ? gatewayAuth
+        : undefined) ??
+    process.env.OPENCLAW_GATEWAY_TOKEN ??
+    undefined;
+
   // Initialize exec approvals handler if enabled
   const execApprovalsConfig = discordCfg.execApprovals ?? {};
   const execApprovalsHandler = execApprovalsConfig.enabled
@@ -469,8 +485,25 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
         token,
         accountId: account.accountId,
         config: execApprovalsConfig,
+        gatewayToken: gatewayAuthToken,
         cfg,
         runtime,
+      })
+    : null;
+
+  // Initialize researcher questions handler if exec approvals is enabled (reuses same approvers)
+  // This handler shows interview questions as Discord buttons
+  const researcherQuestionsConfig = {
+    enabled: execApprovalsConfig.enabled ?? false,
+    approvers: execApprovalsConfig.approvers,
+  };
+  const researcherQuestionsHandler = researcherQuestionsConfig.enabled
+    ? new DiscordResearcherQuestionsHandler({
+        token,
+        accountId: account.accountId,
+        config: researcherQuestionsConfig,
+        gatewayToken: gatewayAuthToken,
+        cfg,
       })
     : null;
 
@@ -485,6 +518,10 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
 
   if (execApprovalsHandler) {
     components.push(createExecApprovalButton({ handler: execApprovalsHandler }));
+  }
+
+  if (researcherQuestionsHandler) {
+    components.push(createResearcherQuestionButton({ handler: researcherQuestionsHandler }));
   }
 
   const client = new Client(
@@ -591,6 +628,11 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     await execApprovalsHandler.start();
   }
 
+  // Start researcher questions handler
+  if (researcherQuestionsHandler) {
+    await researcherQuestionsHandler.start();
+  }
+
   const gateway = client.getPlugin<GatewayPlugin>("gateway");
   if (gateway) {
     registerGateway(account.accountId, gateway);
@@ -670,6 +712,9 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     abortSignal?.removeEventListener("abort", onAbort);
     if (execApprovalsHandler) {
       await execApprovalsHandler.stop();
+    }
+    if (researcherQuestionsHandler) {
+      await researcherQuestionsHandler.stop();
     }
   }
 }

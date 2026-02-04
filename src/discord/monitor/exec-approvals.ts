@@ -191,6 +191,7 @@ export type DiscordExecApprovalHandlerOpts = {
   accountId: string;
   config: DiscordExecApprovalConfig;
   gatewayUrl?: string;
+  gatewayToken?: string;
   cfg: OpenClawConfig;
   runtime?: RuntimeEnv;
   onResolve?: (id: string, decision: ExecApprovalDecision) => Promise<void>;
@@ -268,6 +269,8 @@ export class DiscordExecApprovalHandler {
 
     this.gatewayClient = new GatewayClient({
       url: this.opts.gatewayUrl ?? "ws://127.0.0.1:18789",
+      token: this.opts.gatewayToken,
+      deviceIdentity: null, // Skip device auth, use token auth only
       clientName: GATEWAY_CLIENT_NAMES.GATEWAY_CLIENT,
       clientDisplayName: "Discord Exec Approvals",
       mode: GATEWAY_CLIENT_MODES.BACKEND,

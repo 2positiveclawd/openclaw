@@ -12,10 +12,10 @@ import type {
   ResearchRound,
   ResearchState,
 } from "./types.js";
-import { readResearch, writeResearch } from "./state.js";
-import { runResearchAgent } from "./research-agent.js";
 import { runInterviewAgent } from "./interview-agent.js";
-import { runSynthesizerAgent, writePrdFile } from "./synthesizer-agent.js";
+import { runResearchAgent } from "./research-agent.js";
+import { readResearch, writeResearch } from "./state.js";
+import { runSynthesizerAgent, writePrdFile, writeResearchBrief } from "./synthesizer-agent.js";
 
 // ---------------------------------------------------------------------------
 // Automation (webhooks, chains) - optional, fails silently if not available
@@ -34,7 +34,9 @@ async function loadAutomation() {
 }
 
 async function fireAutomationEvent(
-  eventFn: (mod: typeof import("../../automation/src/index.js")) => import("../../automation/src/index.js").AutomationEvent
+  eventFn: (
+    mod: typeof import("../../automation/src/index.js"),
+  ) => import("../../automation/src/index.js").AutomationEvent,
 ) {
   try {
     const mod = await loadAutomation();
@@ -54,6 +56,15 @@ type Logger = {
 };
 
 type NotifyFn = (notify: ResearchNotifyConfig, message: string) => Promise<void>;
+
+// Broadcast function for emitting gateway events (e.g., for Discord buttons)
+type BroadcastQuestionsFn = (params: {
+  researchId: string;
+  goal: string;
+  questions: string[];
+  timeoutMs: number;
+  notify: ResearchNotifyConfig;
+}) => Promise<void>;
 
 // ---------------------------------------------------------------------------
 // Active research tracking
@@ -83,10 +94,7 @@ export function stopResearch(researchId: string): boolean {
 
 const pendingInputs = new Map<string, (input: string) => void>();
 
-export function waitForUserInput(
-  researchId: string,
-  timeoutMs: number,
-): Promise<string | null> {
+export function waitForUserInput(researchId: string, timeoutMs: number): Promise<string | null> {
   return new Promise((resolve) => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     pendingInputs.set(researchId, (input) => {
@@ -120,10 +128,7 @@ export function isWaitingForInput(researchId: string): boolean {
 
 const pendingGos = new Map<string, (go: boolean) => void>();
 
-export function waitForGo(
-  researchId: string,
-  timeoutMs: number,
-): Promise<boolean> {
+export function waitForGo(researchId: string, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     let timer: ReturnType<typeof setTimeout> | null = null;
     pendingGos.set(researchId, (go) => {
@@ -206,8 +211,9 @@ export async function runResearchOrchestrator(params: {
   pluginConfig: ResearcherPluginConfig;
   logger: Logger;
   notifyFn: NotifyFn;
+  broadcastQuestionsFn?: BroadcastQuestionsFn;
 }): Promise<void> {
-  const { coreDeps, cfg, cliDeps, pluginConfig, logger, notifyFn } = params;
+  const { coreDeps, cfg, cliDeps, pluginConfig, logger, notifyFn, broadcastQuestionsFn } = params;
   let research = params.research;
 
   if (activeResearches.has(research.id)) {
@@ -226,6 +232,7 @@ export async function runResearchOrchestrator(params: {
       pluginConfig,
       logger,
       notifyFn,
+      broadcastQuestionsFn,
     });
   } catch (err) {
     if (!controller.signal.aborted) {
@@ -261,6 +268,7 @@ async function orchestratorBody(
     pluginConfig: ResearcherPluginConfig;
     logger: Logger;
     notifyFn: NotifyFn;
+    broadcastQuestionsFn?: BroadcastQuestionsFn;
   },
 ): Promise<void> {
   let research = initialResearch;
@@ -274,14 +282,18 @@ async function orchestratorBody(
   writeResearch(research);
 
   if (research.notify) {
-    await ctx.notifyFn(
-      research.notify,
-      `Researching your goal: ${research.originalGoal} [${research.id}]. I'll ask you some questions shortly.`,
-    ).catch(() => {});
+    await ctx
+      .notifyFn(
+        research.notify,
+        `Researching your goal: ${research.originalGoal} [${research.id}]. I'll ask you some questions shortly.`,
+      )
+      .catch(() => {});
   }
 
   // Fire automation event: research.started
-  await fireAutomationEvent((mod) => mod.events.researchStarted(research.id, research.originalGoal));
+  await fireAutomationEvent((mod) =>
+    mod.events.researchStarted(research.id, research.originalGoal),
+  );
 
   // =========================================================================
   // LOOP: research → interview → (repeat)
@@ -302,10 +314,9 @@ async function orchestratorBody(
       writeResearch(research);
       ctx.logger.info(`Research ${research.id} stopped: ${research.stopReason}`);
       if (research.notify) {
-        await ctx.notifyFn(
-          research.notify,
-          `Research stopped [${research.id}]: ${research.stopReason}`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(research.notify, `Research stopped [${research.id}]: ${research.stopReason}`)
+          .catch(() => {});
       }
       return;
     }
@@ -317,7 +328,9 @@ async function orchestratorBody(
     research.updatedAtMs = Date.now();
     writeResearch(research);
 
-    ctx.logger.info(`Research ${research.id}: running research agent (round ${research.currentRound})`);
+    ctx.logger.info(
+      `Research ${research.id}: running research agent (round ${research.currentRound})`,
+    );
     research.usage.agentTurns++;
     writeResearch(research);
 
@@ -351,7 +364,9 @@ async function orchestratorBody(
     // -----------------------------------------------------------------
     // PHASE B: INTERVIEW
     // -----------------------------------------------------------------
-    ctx.logger.info(`Research ${research.id}: running interview agent (round ${research.currentRound})`);
+    ctx.logger.info(
+      `Research ${research.id}: running interview agent (round ${research.currentRound})`,
+    );
     research.usage.agentTurns++;
     writeResearch(research);
 
@@ -394,18 +409,32 @@ async function orchestratorBody(
     // Notify user with questions
     const questionList = questions.map((q, i) => `${i + 1}. ${q}`).join("\n");
     if (research.notify) {
-      await ctx.notifyFn(
-        research.notify,
-        `I have ${questions.length} questions about your project [${research.id}]:\n${questionList}\n\nReply: /research-reply ${research.id} <your answers>`,
-      ).catch(() => {});
+      await ctx
+        .notifyFn(
+          research.notify,
+          `I have ${questions.length} questions about your project [${research.id}]:\n${questionList}\n\nReply: /research-reply ${research.id} <your answers>`,
+        )
+        .catch(() => {});
+
+      // Also broadcast questions for Discord buttons UI
+      if (ctx.broadcastQuestionsFn) {
+        await ctx
+          .broadcastQuestionsFn({
+            researchId: research.id,
+            goal: research.originalGoal,
+            questions,
+            timeoutMs: ctx.pluginConfig.interviewTimeoutMs,
+            notify: research.notify,
+          })
+          .catch((err) => {
+            ctx.logger.warn(`Failed to broadcast questions for Discord buttons: ${err}`);
+          });
+      }
     }
 
     // --- Wait for user input ---
     ctx.logger.info(`Research ${research.id}: waiting for user input`);
-    const userInput = await waitForUserInput(
-      research.id,
-      ctx.pluginConfig.interviewTimeoutMs,
-    );
+    const userInput = await waitForUserInput(research.id, ctx.pluginConfig.interviewTimeoutMs);
 
     if (signal.aborted) return;
 
@@ -423,10 +452,12 @@ async function orchestratorBody(
       writeResearch(research);
 
       if (research.notify) {
-        await ctx.notifyFn(
-          research.notify,
-          `Interview timed out for research ${research.id}. Proceeding with available information.`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(
+            research.notify,
+            `Interview timed out for research ${research.id}. Proceeding with available information.`,
+          )
+          .catch(() => {});
       }
       break;
     }
@@ -449,10 +480,12 @@ async function orchestratorBody(
     }
 
     if (research.notify) {
-      await ctx.notifyFn(
-        research.notify,
-        `Thanks! Doing a deeper dive based on your answers... [${research.id}]`,
-      ).catch(() => {});
+      await ctx
+        .notifyFn(
+          research.notify,
+          `Thanks! Doing a deeper dive based on your answers... [${research.id}]`,
+        )
+        .catch(() => {});
     }
 
     await sleep(500, signal);
@@ -491,10 +524,9 @@ async function orchestratorBody(
     research.updatedAtMs = Date.now();
     writeResearch(research);
     if (research.notify) {
-      await ctx.notifyFn(
-        research.notify,
-        `Research FAILED [${research.id}]: Could not generate PRD.`,
-      ).catch(() => {});
+      await ctx
+        .notifyFn(research.notify, `Research FAILED [${research.id}]: Could not generate PRD.`)
+        .catch(() => {});
     }
     return;
   }
@@ -502,6 +534,15 @@ async function orchestratorBody(
   // Write PRD file
   const prdPath = writePrdFile(research.originalGoal, prdContent);
   ctx.logger.info(`Research ${research.id}: PRD written to ${prdPath}`);
+
+  // Auto-save research brief for cross-agent knowledge sharing
+  const briefPath = writeResearchBrief({
+    researchId: research.id,
+    goal: research.originalGoal,
+    rounds: research.rounds,
+    prdPath,
+  });
+  ctx.logger.info(`Research ${research.id}: Brief written to ${briefPath}`);
 
   research = readResearch(research.id) ?? research;
   research.generatedPrdPath = prdPath;
@@ -514,24 +555,23 @@ async function orchestratorBody(
   writeResearch(research);
 
   if (research.notify) {
-    await ctx.notifyFn(
-      research.notify,
-      `Research complete! PRD saved at ${prdPath} [${research.id}].\nReply: /research-go ${research.id} to start building\nReply: /research-view ${research.id} to review the PRD first`,
-    ).catch(() => {});
+    await ctx
+      .notifyFn(
+        research.notify,
+        `Research complete! PRD saved at ${prdPath} [${research.id}].\nReply: /research-go ${research.id} to start building\nReply: /research-view ${research.id} to review the PRD first`,
+      )
+      .catch(() => {});
   }
 
   // Fire automation event: research.completed
   const duration = Date.now() - (research.usage.startedAtMs || Date.now());
   await fireAutomationEvent((mod) =>
-    mod.events.researchCompleted(research.id, research.originalGoal, duration)
+    mod.events.researchCompleted(research.id, research.originalGoal, duration),
   );
 
   // --- Wait for "go" ---
   ctx.logger.info(`Research ${research.id}: waiting for go signal`);
-  const goSignal = await waitForGo(
-    research.id,
-    ctx.pluginConfig.interviewTimeoutMs,
-  );
+  const goSignal = await waitForGo(research.id, ctx.pluginConfig.interviewTimeoutMs);
 
   if (signal.aborted) return;
 
@@ -540,10 +580,12 @@ async function orchestratorBody(
   if (!goSignal) {
     ctx.logger.info(`Research ${research.id}: go signal timed out`);
     if (research.notify) {
-      await ctx.notifyFn(
-        research.notify,
-        `Research ${research.id} timed out waiting for /research-go. PRD is still saved at ${research.generatedPrdPath}. You can launch manually with: openclaw-planner start --from-prd ${research.generatedPrdPath}`,
-      ).catch(() => {});
+      await ctx
+        .notifyFn(
+          research.notify,
+          `Research ${research.id} timed out waiting for /research-go. PRD is still saved at ${research.generatedPrdPath}. You can launch manually with: openclaw-planner start --from-prd ${research.generatedPrdPath}`,
+        )
+        .catch(() => {});
     }
     return;
   }
@@ -555,13 +597,20 @@ async function orchestratorBody(
 
   // Build planner start command
   const plannerArgs = [
-    "planner", "start",
-    "--goal", research.originalGoal,
-    "--from-prd", prdPath,
-    "--max-turns", String(ctx.pluginConfig.defaultPlannerBudget.maxAgentTurns),
-    "--max-tokens", String(ctx.pluginConfig.defaultPlannerBudget.maxTokens),
-    "--max-time", String(ctx.pluginConfig.defaultPlannerBudget.maxTimeMs) + "ms",
-    "--concurrency", String(ctx.pluginConfig.defaultPlannerBudget.maxConcurrency),
+    "planner",
+    "start",
+    "--goal",
+    research.originalGoal,
+    "--from-prd",
+    prdPath,
+    "--max-turns",
+    String(ctx.pluginConfig.defaultPlannerBudget.maxAgentTurns),
+    "--max-tokens",
+    String(ctx.pluginConfig.defaultPlannerBudget.maxTokens),
+    "--max-time",
+    String(ctx.pluginConfig.defaultPlannerBudget.maxTimeMs) + "ms",
+    "--concurrency",
+    String(ctx.pluginConfig.defaultPlannerBudget.maxConcurrency),
   ];
 
   if (research.notify) {
@@ -575,11 +624,10 @@ async function orchestratorBody(
   // Execute planner via subprocess
   const { execFileSync } = await import("node:child_process");
   try {
-    const output = execFileSync(
-      "node",
-      ["/home/azureuser/openclaw/openclaw.mjs", ...plannerArgs],
-      { encoding: "utf-8", timeout: 30_000 },
-    );
+    const output = execFileSync("node", ["/home/azureuser/openclaw/openclaw.mjs", ...plannerArgs], {
+      encoding: "utf-8",
+      timeout: 30_000,
+    });
 
     let planId: string | null = null;
     try {
@@ -600,10 +648,12 @@ async function orchestratorBody(
     ctx.logger.info(`Research ${research.id}: plan ${planId} launched`);
 
     if (research.notify) {
-      await ctx.notifyFn(
-        research.notify,
-        `Plan ${planId ?? "(unknown)"} started from your research [${research.id}]! I'll update you on progress.`,
-      ).catch(() => {});
+      await ctx
+        .notifyFn(
+          research.notify,
+          `Plan ${planId ?? "(unknown)"} started from your research [${research.id}]! I'll update you on progress.`,
+        )
+        .catch(() => {});
     }
   } catch (err) {
     ctx.logger.error(`Research ${research.id}: failed to launch planner: ${err}`);
@@ -614,10 +664,12 @@ async function orchestratorBody(
     writeResearch(research);
 
     if (research.notify) {
-      await ctx.notifyFn(
-        research.notify,
-        `Research FAILED [${research.id}]: Could not launch planner. PRD is saved at ${research.generatedPrdPath}. You can launch manually.`,
-      ).catch(() => {});
+      await ctx
+        .notifyFn(
+          research.notify,
+          `Research FAILED [${research.id}]: Could not launch planner. PRD is saved at ${research.generatedPrdPath}. You can launch manually.`,
+        )
+        .catch(() => {});
     }
   }
 }

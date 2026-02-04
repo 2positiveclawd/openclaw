@@ -10,10 +10,11 @@
 //   - Channel commands: /research-reply, /research-go, /research-stop,
 //     /research-view, /research-status
 
-import type { ResearcherPluginConfig, ResearchNotifyConfig } from "./src/types.js";
+import fs from "node:fs";
 import type { CoreDeps, CoreCliDeps } from "./src/core-bridge.js";
+import type { ResearcherPluginConfig, ResearchNotifyConfig } from "./src/types.js";
+import { registerResearcherCli } from "./src/cli.js";
 import { loadCoreDeps } from "./src/core-bridge.js";
-import { listResearches, readResearch, writeResearch, readRoundLog } from "./src/state.js";
 import {
   getActiveResearchIds,
   isResearchRunning,
@@ -24,8 +25,7 @@ import {
   stopResearch,
 } from "./src/orchestrator.js";
 import { createResearcherService } from "./src/research-service.js";
-import { registerResearcherCli } from "./src/cli.js";
-import fs from "node:fs";
+import { listResearches, readResearch, writeResearch, readRoundLog } from "./src/state.js";
 
 // ---------------------------------------------------------------------------
 // Plugin config defaults
@@ -88,8 +88,7 @@ function createNotifyFn(
 const researcherPlugin = {
   id: "researcher",
   name: "Researcher",
-  description:
-    "Research, interview, and PRD generation — turns vague goals into structured plans",
+  description: "Research, interview, and PRD generation — turns vague goals into structured plans",
   version: "2026.2.1",
 
   register(api: {
@@ -226,12 +225,123 @@ const researcherPlugin = {
     );
 
     // -------------------------------------------------------------------
-    // 3. Register gateway RPC method
+    // 3. Register gateway RPC methods
     // -------------------------------------------------------------------
+
+    // Store broadcast function for use by orchestrator
+    let broadcastFn: ((event: string, payload: unknown) => void) | null = null;
+
+    // Expose broadcast function for orchestrator to use
+    (globalThis as Record<string, unknown>).__researcherBroadcast = (
+      event: string,
+      payload: unknown,
+    ) => {
+      if (broadcastFn) {
+        broadcastFn(event, payload);
+      }
+    };
+
+    // researcher.interview.broadcast - called by orchestrator to send questions to Discord
+    api.registerGatewayMethod(
+      "researcher.interview.broadcast",
+      async ({ params, respond, context }) => {
+        try {
+          const { researchId, goal, questions, timeoutMs, notify } = params as {
+            researchId: string;
+            goal: string;
+            questions: string[];
+            timeoutMs: number;
+            notify: { channel: string; to: string; accountId?: string };
+          };
+
+          if (!researchId || !questions || !notify) {
+            respond(false, { error: "Missing required params" });
+            return;
+          }
+
+          // Store broadcast function from context
+          if (context?.broadcast) {
+            broadcastFn = context.broadcast;
+          }
+
+          // Broadcast event to all connected clients (including Discord handler)
+          context?.broadcast?.(
+            "researcher.interview.questions",
+            {
+              researchId,
+              goal,
+              questions,
+              options: [], // Will be parsed by handler
+              timeoutMs: timeoutMs ?? 1_800_000,
+              notify,
+            },
+            { dropIfSlow: true },
+          );
+
+          respond(true, { ok: true });
+        } catch (err) {
+          respond(false, { error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+    );
+
+    // researcher.interview.answer - called by Discord handler when user answers
+    api.registerGatewayMethod(
+      "researcher.interview.answer",
+      async ({ params, respond, context }) => {
+        try {
+          const { researchId, answers, answeredBy } = params as {
+            researchId: string;
+            answers: string[];
+            answeredBy?: string;
+          };
+
+          if (!researchId || !answers) {
+            respond(false, { error: "Missing researchId or answers" });
+            return;
+          }
+
+          // Join answers into single string for the orchestrator
+          const answerText = answers.join("\n");
+          const resolved = resolveUserInput(researchId, answerText);
+
+          if (resolved) {
+            // Broadcast that answers were received
+            context?.broadcast?.(
+              "researcher.interview.answered",
+              {
+                researchId,
+                answers,
+                answeredBy,
+              },
+              { dropIfSlow: true },
+            );
+
+            respond(true, { ok: true, message: "Answers submitted" });
+            return;
+          }
+
+          const research = readResearch(researchId);
+          if (!research) {
+            respond(false, { error: `Research ${researchId} not found` });
+            return;
+          }
+          if (research.status !== "interviewing") {
+            respond(false, {
+              error: `Research ${researchId} is not waiting for input (status: ${research.status})`,
+            });
+            return;
+          }
+          respond(false, { error: `Research ${researchId} is not currently waiting for a reply` });
+        } catch (err) {
+          respond(false, { error: err instanceof Error ? err.message : String(err) });
+        }
+      },
+    );
+
     api.registerGatewayMethod("researcher.status", async ({ params, respond }) => {
       try {
-        const researchId =
-          typeof params.researchId === "string" ? params.researchId : undefined;
+        const researchId = typeof params.researchId === "string" ? params.researchId : undefined;
         if (researchId) {
           const research = readResearch(researchId);
           if (!research) {
@@ -340,11 +450,16 @@ const researcherPlugin = {
           }
           res.writeHead(400, { "Content-Type": "application/json" });
           res.end(
-            JSON.stringify({ ok: false, error: `Research ${researchId} is not currently waiting for a reply` }),
+            JSON.stringify({
+              ok: false,
+              error: `Research ${researchId} is not currently waiting for a reply`,
+            }),
           );
         } catch (err) {
           res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+          res.end(
+            JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+          );
         }
       },
     });
@@ -386,22 +501,35 @@ const researcherPlugin = {
           if (research.status === "launched") {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(
-              JSON.stringify({ ok: false, error: `Research already launched plan ${research.launchedPlanId}` }),
+              JSON.stringify({
+                ok: false,
+                error: `Research already launched plan ${research.launchedPlanId}`,
+              }),
             );
             return;
           }
           if (research.status !== "ready") {
             res.writeHead(400, { "Content-Type": "application/json" });
             res.end(
-              JSON.stringify({ ok: false, error: `Research ${researchId} is not ready (status: ${research.status})` }),
+              JSON.stringify({
+                ok: false,
+                error: `Research ${researchId} is not ready (status: ${research.status})`,
+              }),
             );
             return;
           }
           res.writeHead(400, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: `Research ${researchId} is not waiting for a go signal` }));
+          res.end(
+            JSON.stringify({
+              ok: false,
+              error: `Research ${researchId} is not waiting for a go signal`,
+            }),
+          );
         } catch (err) {
           res.writeHead(500, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+          res.end(
+            JSON.stringify({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+          );
         }
       },
     });
@@ -521,7 +649,9 @@ const researcherPlugin = {
           return { text: `Research ${id} not found.` };
         }
         if (!research.generatedPrdPath) {
-          return { text: `Research ${id} has not generated a PRD yet (status: ${research.status}).` };
+          return {
+            text: `Research ${id} has not generated a PRD yet (status: ${research.status}).`,
+          };
         }
 
         try {
