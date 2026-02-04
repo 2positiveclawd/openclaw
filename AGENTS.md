@@ -10,6 +10,23 @@
 | `2positiveclawd/snake-game`      | Deployed game demo                                     | `main` |
 | `~/projects/openclawd-dashboard` | Local dashboard (NOT on Vercel)                        | `main` |
 
+## Mission Control Dashboard
+
+**Full documentation:** See `docs/fork/DASHBOARD.md`
+
+The local-first dashboard at `~/projects/openclawd-dashboard` provides monitoring and control for all agent execution. Key pages:
+
+- `/` — Overview with quick actions
+- `/goals` — Goal-loop monitoring, start/stop/resume
+- `/plans` — Planner kanban, DAG, budget gauges
+- `/research` — Research sessions, interview Q&A
+- `/analytics` — Usage charts, cost breakdown
+- `/automation` — Templates, webhooks, chains
+
+**Run:** `cd ~/projects/openclawd-dashboard && npm run dev` → `http://localhost:3000`
+
+**Agent requirement:** When making changes to the dashboard, update `docs/fork/DASHBOARD.md` to reflect those changes. Keep the doc in sync with the actual dashboard features.
+
 ## Runtime: Systemd (Active)
 
 ```
@@ -30,6 +47,12 @@ Config: deploy/.env (create from .env.example)
 ```
 
 Docker mounts `~/.openclaw` at same path for config compatibility.
+
+**Build tips:**
+
+- Avoid `--no-cache` unless you changed the Dockerfile or base image. It forces full rebuild (~13 min).
+- Normal rebuild (code changes only): ~1-2 min with layer caching.
+- Use `--no-cache` only when: changing Dockerfile, updating base image, or debugging build issues.
 
 ## Security Posture
 
