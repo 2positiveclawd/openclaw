@@ -5,8 +5,8 @@
 // Sends interview questions as Discord embeds with buttons for answering.
 // Similar to exec-approvals.ts but for researcher interview flow.
 
+import type { ButtonInteraction, ComponentData } from "@buape/carbon";
 import type { OpenClawConfig } from "openclaw/plugin-sdk";
-import { Button, type ButtonInteraction, type ComponentData } from "@buape/carbon";
 import { ButtonStyle, Routes } from "discord-api-types/v10";
 import {
   type EventFrame,
@@ -672,68 +672,62 @@ export type ResearcherQuestionButtonContext = {
   handler: DiscordResearcherQuestionsHandler;
 };
 
-export class ResearcherQuestionButton extends Button {
-  label = "researchq";
-  customId = `${RESEARCHER_KEY}:seed=1`;
-  style = ButtonStyle.Primary;
-  private ctx: ResearcherQuestionButtonContext;
+export function createResearcherQuestionButtonSpec(
+  ctx: ResearcherQuestionButtonContext,
+): import("openclaw/plugin-sdk").DiscordButtonSpec {
+  return {
+    customId: `${RESEARCHER_KEY}:seed=1`,
+    label: "researchq",
+    defer: false,
+    ephemeral: false,
+    run: async (interaction: ButtonInteraction, data: Record<string, unknown>) => {
+      const parsed = parseResearcherQuestionData(data as ComponentData);
+      if (!parsed) {
+        try {
+          await interaction.reply({
+            content: "This interview is no longer valid.",
+            ephemeral: true,
+          });
+        } catch {
+          // Interaction may have expired
+        }
+        return;
+      }
 
-  constructor(ctx: ResearcherQuestionButtonContext) {
-    super();
-    this.ctx = ctx;
-  }
+      const result = await ctx.handler.handleButtonClick(
+        parsed.researchId,
+        parsed.questionIndex,
+        parsed.optionIndex,
+        parsed.submit,
+        parsed.skip,
+        interaction.user?.username,
+      );
 
-  async run(interaction: ButtonInteraction, data: ComponentData): Promise<void> {
-    const parsed = parseResearcherQuestionData(data);
-    if (!parsed) {
+      if (!result.success) {
+        try {
+          await interaction.reply({
+            content: result.message,
+            ephemeral: true,
+          });
+        } catch {
+          // Interaction may have expired
+        }
+        return;
+      }
+
+      // Update the message with new embed/components
       try {
-        await interaction.reply({
-          content: "This interview is no longer valid.",
-          ephemeral: true,
-        });
+        if (result.updatedEmbed) {
+          await interaction.update({
+            embeds: [result.updatedEmbed],
+            components: result.updatedComponents as never[],
+          });
+        } else {
+          await interaction.deferUpdate();
+        }
       } catch {
         // Interaction may have expired
       }
-      return;
-    }
-
-    const result = await this.ctx.handler.handleButtonClick(
-      parsed.researchId,
-      parsed.questionIndex,
-      parsed.optionIndex,
-      parsed.submit,
-      parsed.skip,
-      interaction.user?.username,
-    );
-
-    if (!result.success) {
-      try {
-        await interaction.reply({
-          content: result.message,
-          ephemeral: true,
-        });
-      } catch {
-        // Interaction may have expired
-      }
-      return;
-    }
-
-    // Update the message with new embed/components
-    try {
-      if (result.updatedEmbed) {
-        await interaction.update({
-          embeds: [result.updatedEmbed],
-          components: result.updatedComponents as never[],
-        });
-      } else {
-        await interaction.deferUpdate();
-      }
-    } catch {
-      // Interaction may have expired
-    }
-  }
-}
-
-export function createResearcherQuestionButton(ctx: ResearcherQuestionButtonContext): Button {
-  return new ResearcherQuestionButton(ctx);
+    },
+  };
 }

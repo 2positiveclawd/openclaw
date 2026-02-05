@@ -20,8 +20,8 @@
 import type { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import { registerDiscordComponentFactory } from "openclaw/plugin-sdk";
-import { createScoutProposalButton } from "./src/discord-buttons.js";
+import { registerDiscordButton } from "openclaw/plugin-sdk";
+import { createScoutProposalButtonSpec } from "./src/discord-buttons.js";
 import { runTrendScout, getRecentDigests, loadConfig, saveConfig } from "./src/scout-service.js";
 import { DEFAULT_CONFIG } from "./src/types.js";
 
@@ -319,8 +319,8 @@ const trendScoutPlugin = {
       },
     });
 
-    // Register Discord button component for scout proposal approval
-    registerDiscordComponentFactory(() => createScoutProposalButton());
+    // Register Discord button handler for scout proposal approval
+    registerDiscordButton(createScoutProposalButtonSpec());
 
     logger.info("Trend Scout extension loaded");
   },

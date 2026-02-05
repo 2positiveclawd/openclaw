@@ -12,7 +12,7 @@
 
 import fs from "node:fs";
 import {
-  registerDiscordComponentFactory,
+  registerDiscordButton,
   resolveDefaultDiscordAccountId,
   resolveDiscordAccount,
 } from "openclaw/plugin-sdk";
@@ -21,7 +21,7 @@ import type { ResearcherPluginConfig, ResearchNotifyConfig } from "./src/types.j
 import { registerResearcherCli } from "./src/cli.js";
 import { loadCoreDeps } from "./src/core-bridge.js";
 import {
-  createResearcherQuestionButton,
+  createResearcherQuestionButtonSpec,
   DiscordResearcherQuestionsHandler,
 } from "./src/discord-questions.js";
 import {
@@ -211,8 +211,8 @@ const researcherPlugin = {
             cfg: api.config,
           });
 
-          registerDiscordComponentFactory(() =>
-            createResearcherQuestionButton({ handler: researcherQuestionsHandler! }),
+          registerDiscordButton(
+            createResearcherQuestionButtonSpec({ handler: researcherQuestionsHandler! }),
           );
         }
       }

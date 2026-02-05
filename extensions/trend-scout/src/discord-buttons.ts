@@ -9,8 +9,7 @@
 // Registry lives at ~/.openclaw/scout-proposals/registry.json and is shared
 // with scripts/scout-notify.ts which sends the initial messages.
 
-import { Button, type ButtonInteraction, type ComponentData } from "@buape/carbon";
-import { ButtonStyle } from "discord-api-types/v10";
+import type { ButtonInteraction, ComponentData } from "@buape/carbon";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -146,161 +145,167 @@ export function parseScoutProposalData(
 // Button component
 // ---------------------------------------------------------------------------
 
-export class ScoutProposalButton extends Button {
-  label = "scoutprop";
-  customId = `${SCOUT_PROPOSAL_KEY}:seed=1`;
-  style = ButtonStyle.Primary;
+// ---------------------------------------------------------------------------
+// Button interaction handler
+// ---------------------------------------------------------------------------
 
-  async run(interaction: ButtonInteraction, data: ComponentData): Promise<void> {
-    const parsed = parseScoutProposalData(data);
-    if (!parsed) {
-      try {
-        await interaction.reply({
-          content: "This proposal button is no longer valid.",
-          ephemeral: true,
-        });
-      } catch {
-        // Interaction may have expired
-      }
-      return;
-    }
-
-    const proposal = findProposal(parsed.proposalId);
-    if (!proposal) {
-      try {
-        await interaction.reply({
-          content: `Proposal ${parsed.proposalId} not found in registry.`,
-          ephemeral: true,
-        });
-      } catch {
-        // Interaction may have expired
-      }
-      return;
-    }
-
-    switch (parsed.action) {
-      case "approve":
-        await this.handleApprove(interaction, proposal);
-        break;
-      case "reject":
-        await this.handleReject(interaction, proposal);
-        break;
-      case "info":
-        await this.handleInfo(interaction, proposal);
-        break;
-    }
-  }
-
-  private async handleApprove(
-    interaction: ButtonInteraction,
-    proposal: ScoutProposal,
-  ): Promise<void> {
-    const user = interaction.user;
-    const userName = user?.username ?? user?.id ?? "unknown";
-
-    // Acknowledge immediately
-    try {
-      await interaction.update({
-        content: `Approved by **${userName}** — starting planner...`,
-        components: [] as any,
-      });
-    } catch (err) {
-      logError(`scout-proposals: update failed for approve: ${String(err)}`);
-    }
-
-    // Update registry
-    updateProposalStatus(proposal.id, {
-      status: "approved",
-      resolvedAt: new Date().toISOString(),
-      resolvedBy: userName,
-    });
-
-    // Spawn planner
-    const criteriaArgs = (proposal.criteria ?? []).flatMap((c) => ["--criteria", c]);
-    const args = [
-      "/home/azureuser/openclaw/openclaw.mjs",
-      "planner",
-      "start",
-      "--goal",
-      proposal.fullContent || `${proposal.title}\n\n${proposal.problem}\n\n${proposal.solution}`,
-      ...criteriaArgs,
-      "--notify-channel",
-      "discord",
-      "--notify-to",
-      proposal.channelId,
-    ];
-
-    logDebug(`scout-proposals: spawning planner for proposal ${proposal.id}`);
-
-    // Fire-and-forget: the planner CLI blocks until plan completes (can take
-    // minutes/hours). We detach so the gateway doesn't hold the child process.
-    const child = spawn("node", args, {
-      detached: true,
-      stdio: "ignore",
-    });
-    child.unref();
-    logDebug(`scout-proposals: planner spawned for ${proposal.id} (PID ${child.pid})`);
-  }
-
-  private async handleReject(
-    interaction: ButtonInteraction,
-    proposal: ScoutProposal,
-  ): Promise<void> {
-    const user = interaction.user;
-    const userName = user?.username ?? user?.id ?? "unknown";
-
-    try {
-      await interaction.update({
-        content: `Rejected by **${userName}**.`,
-        components: [] as any,
-      });
-    } catch (err) {
-      logError(`scout-proposals: update failed for reject: ${String(err)}`);
-    }
-
-    updateProposalStatus(proposal.id, {
-      status: "rejected",
-      resolvedAt: new Date().toISOString(),
-      resolvedBy: userName,
-    });
-  }
-
-  private async handleInfo(interaction: ButtonInteraction, proposal: ScoutProposal): Promise<void> {
-    // Send full proposal as ephemeral reply (only visible to clicker)
-    const content =
-      proposal.fullContent ||
-      [
-        `# ${proposal.title}`,
-        "",
-        `**Problem:** ${proposal.problem}`,
-        `**Solution:** ${proposal.solution}`,
-        "",
-        `**Criteria:**`,
-        ...(proposal.criteria ?? []).map((c) => `- ${c}`),
-        "",
-        `**Effort:** ${proposal.effort} | **Impact:** ${proposal.impact} | **Risk:** ${proposal.risk}`,
-        `**Files:** ${proposal.files}`,
-      ].join("\n");
-
-    // Discord limit is 2000 chars; truncate if needed
-    const truncated =
-      content.length > 1900 ? `${content.slice(0, 1900)}\n\n*(truncated)*` : content;
-
+async function handleScoutProposalInteraction(
+  interaction: ButtonInteraction,
+  data: Record<string, unknown>,
+): Promise<void> {
+  const parsed = parseScoutProposalData(data as ComponentData);
+  if (!parsed) {
     try {
       await interaction.reply({
-        content: truncated,
+        content: "This proposal button is no longer valid.",
         ephemeral: true,
       });
-    } catch (err) {
-      logError(`scout-proposals: reply failed for info: ${String(err)}`);
+    } catch {
+      // Interaction may have expired
     }
+    return;
+  }
+
+  const proposal = findProposal(parsed.proposalId);
+  if (!proposal) {
+    try {
+      await interaction.reply({
+        content: `Proposal ${parsed.proposalId} not found in registry.`,
+        ephemeral: true,
+      });
+    } catch {
+      // Interaction may have expired
+    }
+    return;
+  }
+
+  switch (parsed.action) {
+    case "approve":
+      await handleApprove(interaction, proposal);
+      break;
+    case "reject":
+      await handleReject(interaction, proposal);
+      break;
+    case "info":
+      await handleInfo(interaction, proposal);
+      break;
+  }
+}
+
+async function handleApprove(
+  interaction: ButtonInteraction,
+  proposal: ScoutProposal,
+): Promise<void> {
+  const user = interaction.user;
+  const userName = user?.username ?? user?.id ?? "unknown";
+
+  // Acknowledge immediately
+  try {
+    await interaction.update({
+      content: `Approved by **${userName}** — starting planner...`,
+      components: [] as any,
+    });
+  } catch (err) {
+    logError(`scout-proposals: update failed for approve: ${String(err)}`);
+  }
+
+  // Update registry
+  updateProposalStatus(proposal.id, {
+    status: "approved",
+    resolvedAt: new Date().toISOString(),
+    resolvedBy: userName,
+  });
+
+  // Spawn planner
+  const criteriaArgs = (proposal.criteria ?? []).flatMap((c) => ["--criteria", c]);
+  const args = [
+    "/home/azureuser/openclaw/openclaw.mjs",
+    "planner",
+    "start",
+    "--goal",
+    proposal.fullContent || `${proposal.title}\n\n${proposal.problem}\n\n${proposal.solution}`,
+    ...criteriaArgs,
+    "--notify-channel",
+    "discord",
+    "--notify-to",
+    proposal.channelId,
+  ];
+
+  logDebug(`scout-proposals: spawning planner for proposal ${proposal.id}`);
+
+  // Fire-and-forget: the planner CLI blocks until plan completes (can take
+  // minutes/hours). We detach so the gateway doesn't hold the child process.
+  const child = spawn("node", args, {
+    detached: true,
+    stdio: "ignore",
+  });
+  child.unref();
+  logDebug(`scout-proposals: planner spawned for ${proposal.id} (PID ${child.pid})`);
+}
+
+async function handleReject(
+  interaction: ButtonInteraction,
+  proposal: ScoutProposal,
+): Promise<void> {
+  const user = interaction.user;
+  const userName = user?.username ?? user?.id ?? "unknown";
+
+  try {
+    await interaction.update({
+      content: `Rejected by **${userName}**.`,
+      components: [] as any,
+    });
+  } catch (err) {
+    logError(`scout-proposals: update failed for reject: ${String(err)}`);
+  }
+
+  updateProposalStatus(proposal.id, {
+    status: "rejected",
+    resolvedAt: new Date().toISOString(),
+    resolvedBy: userName,
+  });
+}
+
+async function handleInfo(interaction: ButtonInteraction, proposal: ScoutProposal): Promise<void> {
+  // Send full proposal as ephemeral reply (only visible to clicker)
+  const content =
+    proposal.fullContent ||
+    [
+      `# ${proposal.title}`,
+      "",
+      `**Problem:** ${proposal.problem}`,
+      `**Solution:** ${proposal.solution}`,
+      "",
+      `**Criteria:**`,
+      ...(proposal.criteria ?? []).map((c) => `- ${c}`),
+      "",
+      `**Effort:** ${proposal.effort} | **Impact:** ${proposal.impact} | **Risk:** ${proposal.risk}`,
+      `**Files:** ${proposal.files}`,
+    ].join("\n");
+
+  // Discord limit is 2000 chars; truncate if needed
+  const truncated = content.length > 1900 ? `${content.slice(0, 1900)}\n\n*(truncated)*` : content;
+
+  try {
+    await interaction.reply({
+      content: truncated,
+      ephemeral: true,
+    });
+  } catch (err) {
+    logError(`scout-proposals: reply failed for info: ${String(err)}`);
   }
 }
 
 // ---------------------------------------------------------------------------
-// Factory
+// Button spec factory (returns a DiscordButtonSpec, not a Button instance)
 // ---------------------------------------------------------------------------
 
-export function createScoutProposalButton(): Button {
-  return new ScoutProposalButton();
+export function createScoutProposalButtonSpec(): import("openclaw/plugin-sdk").DiscordButtonSpec {
+  return {
+    customId: `${SCOUT_PROPOSAL_KEY}:seed=1`,
+    label: "scoutprop",
+    defer: false,
+    ephemeral: false,
+    run: handleScoutProposalInteraction,
+  };
 }

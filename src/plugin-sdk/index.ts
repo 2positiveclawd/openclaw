@@ -399,8 +399,11 @@ export { loadProviderUsageSummary } from "../infra/provider-usage.load.js";
 export { deliverOutboundPayloads, type OutboundDeliveryResult } from "../infra/outbound/deliver.js";
 export { createDefaultDeps, type CliDeps } from "../cli/deps.js";
 
-// Discord component registration (for extensions with button handlers)
-export { registerDiscordComponentFactory } from "../discord/monitor/component-registry.js";
+// Discord button registration (for extensions with button handlers)
+export {
+  registerDiscordButton,
+  type DiscordButtonSpec,
+} from "../discord/monitor/component-registry.js";
 
 // Gateway client (for extensions needing WebSocket to gateway)
 export { GatewayClient } from "../gateway/client.js";
