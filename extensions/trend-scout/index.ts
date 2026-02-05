@@ -20,7 +20,7 @@
 import type { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import { registerDiscordButton } from "openclaw/plugin-sdk";
+import { registerDiscordButton } from "openclaw/extension-bridge";
 import { createScoutProposalButtonSpec } from "./src/discord-buttons.js";
 import { runTrendScout, getRecentDigests, loadConfig, saveConfig } from "./src/scout-service.js";
 import { DEFAULT_CONFIG } from "./src/types.js";

@@ -14,7 +14,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { logDebug, logError } from "openclaw/plugin-sdk";
+import { logDebug, logError } from "openclaw/extension-bridge";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -300,7 +300,7 @@ async function handleInfo(interaction: ButtonInteraction, proposal: ScoutProposa
 // Button spec factory (returns a DiscordButtonSpec, not a Button instance)
 // ---------------------------------------------------------------------------
 
-export function createScoutProposalButtonSpec(): import("openclaw/plugin-sdk").DiscordButtonSpec {
+export function createScoutProposalButtonSpec(): import("openclaw/extension-bridge").DiscordButtonSpec {
   return {
     customId: `${SCOUT_PROPOSAL_KEY}:seed=1`,
     label: "scoutprop",

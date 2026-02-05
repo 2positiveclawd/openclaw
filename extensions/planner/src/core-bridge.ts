@@ -2,7 +2,7 @@
 // Planner – Core Bridge
 // ---------------------------------------------------------------------------
 //
-// Imports from openclaw/plugin-sdk for extension-to-core communication.
+// Imports from openclaw/extension-bridge for extension-to-core communication.
 
 import {
   runCronIsolatedAgentTurn,
@@ -12,7 +12,7 @@ import {
   type RunCronAgentTurnResult,
   type OutboundDeliveryResult,
   type CliDeps,
-} from "openclaw/plugin-sdk";
+} from "openclaw/extension-bridge";
 
 // ---------------------------------------------------------------------------
 // Re-export types for extension use

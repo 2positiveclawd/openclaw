@@ -127,7 +127,7 @@ Extensions are loaded at runtime via jiti (TypeScript transpiler), which resolve
 **Key files:**
 
 - `src/discord/monitor/component-registry.ts` — Spec registry + `createButtonFromSpec()`
-- `src/plugin-sdk/index.ts` — Exports `registerDiscordButton`, `DiscordButtonSpec`
+- `src/extension-bridge/index.ts` — Exports `registerDiscordButton`, `DiscordButtonSpec`
 - `extensions/trend-scout/src/discord-buttons.ts` — Uses `createScoutProposalButtonSpec()`
 - `extensions/researcher/src/discord-questions.ts` — Uses `createResearcherQuestionButtonSpec()`
 
@@ -258,24 +258,19 @@ timeout 5 openclaw goal list 2>&1
 
 These are minimal patches we maintain locally. If `git pull` causes conflicts in these files, reapply the patches described below.
 
-### Plugin-SDK Extension Bridge Exports
+### Extension Bridge Entry Point
 
-**File:** `src/plugin-sdk/index.ts`
+**New file:** `src/extension-bridge/index.ts` — Dedicated entry point for fork extension imports.
 
-**Why:** The goal-loop, planner, and researcher extensions need to import core functions. Rather than using fragile dynamic imports from `dist/` paths (which break when the build config changes), we export them through the stable plugin-sdk API.
+**Why:** Extensions need core orchestration functions. Previously we patched `src/plugin-sdk/index.ts` (high conflict risk). Now we use a separate `extension-bridge` entry point, keeping plugin-sdk upstream-clean.
 
-**Patch:** Add these lines at the end of `src/plugin-sdk/index.ts`:
+**Config patches (low conflict risk):**
 
-```ts
-// Extension bridge (for goal-loop, planner, researcher extensions)
-export {
-  runCronIsolatedAgentTurn,
-  type RunCronAgentTurnResult,
-} from "../cron/isolated-agent/run.js";
-export { loadProviderUsageSummary } from "../infra/provider-usage.load.js";
-export { deliverOutboundPayloads, type OutboundDeliveryResult } from "../infra/outbound/deliver.js";
-export { createDefaultDeps, type CliDeps } from "../cli/deps.js";
-```
+- `tsdown.config.ts` — +7 lines (extension-bridge build entry)
+- `package.json` — +1 line in `exports` (`"./extension-bridge"`)
+- `src/plugins/loader.ts` — +25 lines (jiti alias for `openclaw/extension-bridge`)
+
+**Note:** `src/plugin-sdk/index.ts` has **zero** fork-specific exports.
 
 ### Extension Core-Bridge Files
 
@@ -285,9 +280,7 @@ export { createDefaultDeps, type CliDeps } from "../cli/deps.js";
 - `extensions/planner/src/core-bridge.ts`
 - `extensions/researcher/src/core-bridge.ts`
 
-**Why:** These files originally used `importCoreModule()` to dynamically load from `dist/` paths. This broke when those paths weren't built as separate entry points. The fix is to import from `openclaw/plugin-sdk` instead.
-
-**Patch:** Replace the entire `core-bridge.ts` in each extension with the simplified version that imports from `openclaw/plugin-sdk`. See current files for the template (they're identical except for the header comment).
+**Import path:** `openclaw/extension-bridge` (for orchestration APIs). Extensions keep `openclaw/plugin-sdk` for standard plugin types (OpenClawConfig, etc.).
 
 ## Project Structure & Module Organization
 

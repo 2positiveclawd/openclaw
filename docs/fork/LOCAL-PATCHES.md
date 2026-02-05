@@ -4,53 +4,27 @@ This document describes patches maintained in our fork (`2positiveclawd/openclaw
 
 ## Overview
 
-Our fork adds extensions (goal-loop, planner, researcher) that need to import core functions. Rather than using fragile dynamic imports from `dist/` paths, we export these through the stable plugin-sdk API.
+Our fork adds extensions (goal-loop, planner, researcher, trend-scout) that need to import core functions. These are exported through a dedicated `extension-bridge` entry point, keeping the upstream `plugin-sdk/index.ts` completely untouched.
 
 ## Patches
 
-### 1. Plugin-SDK Extension Bridge Exports
+### 1. Extension Bridge Entry Point
 
-**File:** `src/plugin-sdk/index.ts`
+**New file (no upstream conflict):** `src/extension-bridge/index.ts`
 
-**Lines added:** 12 (at end of file)
+**Purpose:** Dedicated entry point that exports orchestration APIs, Discord button registration, gateway client, logging, and other core functions that extensions need.
 
-**Purpose:** Export core functions that extensions need to import.
+Extensions import from `openclaw/extension-bridge` for these APIs and continue using `openclaw/plugin-sdk` for standard plugin types (OpenClawConfig, PluginApi, etc.).
 
-**The patch:**
+**Build config changes:**
 
-```typescript
-// Extension bridge (for goal-loop, planner, researcher extensions)
-export {
-  runCronIsolatedAgentTurn,
-  type RunCronAgentTurnResult,
-} from "../cron/isolated-agent/run.js";
-export { loadProviderUsageSummary } from "../infra/provider-usage.load.js";
-export { deliverOutboundPayloads, type OutboundDeliveryResult } from "../infra/outbound/deliver.js";
-export { createDefaultDeps, type CliDeps } from "../cli/deps.js";
+| File                    | Change                                                 | Conflict risk                   |
+| ----------------------- | ------------------------------------------------------ | ------------------------------- |
+| `tsdown.config.ts`      | +7 lines (new entry point block)                       | LOW — config rarely changes     |
+| `package.json`          | +1 line in `exports`                                   | LOW — additive                  |
+| `src/plugins/loader.ts` | +25 lines (jiti alias for `openclaw/extension-bridge`) | LOW — alias code rarely changes |
 
-// Discord button registration (for extensions with button handlers)
-export {
-  registerDiscordButton,
-  type DiscordButtonSpec,
-} from "../discord/monitor/component-registry.js";
-
-// Gateway client (for extensions needing WebSocket to gateway)
-export { GatewayClient } from "../gateway/client.js";
-export { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
-
-// Discord REST helpers
-export { createDiscordClient } from "../discord/send.shared.js";
-
-// Logging (for extensions that need debug/error logging)
-export { logDebug, logError } from "../logger.js";
-
-// Gateway protocol types
-export type { EventFrame } from "../gateway/protocol/index.js";
-```
-
-**Conflict likelihood:** LOW - only conflicts if upstream adds exports at the exact end of the file.
-
-**Resolution:** Re-add the block at the end of the file after resolving.
+**Note:** `src/plugin-sdk/index.ts` is **completely clean** — zero fork-specific exports.
 
 ---
 
@@ -62,9 +36,9 @@ export type { EventFrame } from "../gateway/protocol/index.js";
 - `extensions/planner/src/core-bridge.ts`
 - `extensions/researcher/src/core-bridge.ts`
 
-**Purpose:** These files provide the bridge between extensions and core. Originally they used `importCoreModule()` to dynamically load from `dist/` paths. We simplified them to import from `openclaw/plugin-sdk`.
+**Purpose:** These files provide the bridge between extensions and core. They import from `openclaw/extension-bridge`.
 
-**Conflict likelihood:** NONE - these extensions are not in upstream.
+**Conflict likelihood:** NONE — these extensions are not in upstream.
 
 ---
 
@@ -104,32 +78,23 @@ Anti-bot detection bypass using Apify's fingerprint-suite. Injects realistic bro
 
 ### The Problem
 
-The original `core-bridge.ts` files used dynamic imports:
-
-```typescript
-// OLD (broken) approach
-await importCoreModule("cron/isolated-agent/run.js");
-await importCoreModule("infra/provider-usage.js");
-```
-
-This constructed paths like `dist/cron/isolated-agent/run.js` and imported them at runtime. But the bundler (tsdown) doesn't create these as separate files - everything gets bundled into the main entry points.
-
-### Failed Alternatives
-
-1. **Adding entry points to tsdown.config.ts** - Works but requires modifying build config for every module extensions need. Creates more merge conflicts.
-
-2. **Using unbundled builds** - Would require switching away from tsdown, major change.
+Extensions need to import core orchestration functions (agent turn runner, outbound delivery, provider usage, etc.). Originally we added these exports to `src/plugin-sdk/index.ts`, but that file is actively maintained upstream and was our highest-conflict modification.
 
 ### The Solution
 
-Export the needed functions through `plugin-sdk`, which is already built as a separate entry point with its own `dist/plugin-sdk/index.js`. Extensions import from the stable `openclaw/plugin-sdk` path.
+A dedicated `src/extension-bridge/index.ts` entry point that:
+
+- Is built as a separate tsdown entry (`dist/extension-bridge/index.js`)
+- Has its own `package.json` exports mapping (`./extension-bridge`)
+- Gets a jiti alias in the plugin loader (`openclaw/extension-bridge`)
+- Keeps `src/plugin-sdk/index.ts` completely upstream-clean
 
 Benefits:
 
-- Minimal patch (12 lines in one core file)
-- Uses existing plugin-sdk infrastructure
-- No build config changes needed
+- Zero conflict risk on the previously highest-risk file
+- Low conflict risk on config files (tsdown, package.json, loader)
 - Extensions use stable import paths
+- Clear separation: plugin-sdk = upstream API, extension-bridge = fork API
 
 ---
 
@@ -143,13 +108,13 @@ If `git pull upstream main` causes conflicts:
 git status
 ```
 
-### Step 2: For plugin-sdk conflicts
+### Step 2: For tsdown/package.json/loader conflicts
 
-```bash
-# Open the file and find the conflict markers
-# Keep upstream changes, then add our export block at the end
-code src/plugin-sdk/index.ts
-```
+These are additive patches. Keep upstream changes and re-add our additions:
+
+- `tsdown.config.ts`: Re-add the extension-bridge entry block
+- `package.json`: Re-add `"./extension-bridge"` to exports
+- `src/plugins/loader.ts`: Re-add `resolveExtensionBridgeAlias()` and the alias config
 
 ### Step 3: Rebuild and test
 
@@ -164,7 +129,7 @@ journalctl --user -u openclaw-gateway -f
 
 ```bash
 git add -A
-git commit -m "Merge upstream, reapply extension bridge exports"
+git commit -m "Merge upstream, reapply extension bridge patches"
 git push origin main
 ```
 
@@ -179,15 +144,17 @@ After applying patches, verify extensions load:
 systemctl --user restart openclaw-gateway
 
 # Check logs (should see "service starting" not "failed to start")
-journalctl --user -u openclaw-gateway --since "30 seconds ago" | grep -E "(Goal loop|Planner|Researcher)"
+journalctl --user -u openclaw-gateway --since "30 seconds ago" | grep -E "(Goal loop|Planner|Researcher|Trend Scout)"
 ```
 
 Expected output:
 
 ```
+[plugins] Trend Scout extension loaded
 [plugins] Goal loop service starting
 [plugins] Planner service starting
 [plugins] Researcher service starting
+[plugins] Trend Scout scheduler starting...
 ```
 
-If you see "failed to start" errors about missing modules, the plugin-sdk exports weren't applied correctly.
+If you see "failed to start" errors about missing modules, the extension-bridge entry point wasn't built or the jiti alias wasn't applied.

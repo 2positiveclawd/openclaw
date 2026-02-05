@@ -16,7 +16,7 @@ import {
   createDiscordClient,
   logDebug,
   logError,
-} from "openclaw/plugin-sdk";
+} from "openclaw/extension-bridge";
 
 const RESEARCHER_KEY = "researchq";
 
@@ -674,7 +674,7 @@ export type ResearcherQuestionButtonContext = {
 
 export function createResearcherQuestionButtonSpec(
   ctx: ResearcherQuestionButtonContext,
-): import("openclaw/plugin-sdk").DiscordButtonSpec {
+): import("openclaw/extension-bridge").DiscordButtonSpec {
   return {
     customId: `${RESEARCHER_KEY}:seed=1`,
     label: "researchq",

@@ -25,6 +25,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./plugin-sdk": "./dist/plugin-sdk/index.js",
+    "./extension-bridge": "./dist/extension-bridge/index.js",
     "./cli-entry": "./openclaw.mjs"
   },
   "scripts": {

@@ -73,6 +73,37 @@ const resolvePluginSdkAlias = (): string | null => {
   return null;
 };
 
+const resolveExtensionBridgeAlias = (): string | null => {
+  try {
+    const modulePath = fileURLToPath(import.meta.url);
+    const isProduction = process.env.NODE_ENV === "production";
+    const isTest = process.env.VITEST || process.env.NODE_ENV === "test";
+    let cursor = path.dirname(modulePath);
+    for (let i = 0; i < 6; i += 1) {
+      const srcCandidate = path.join(cursor, "src", "extension-bridge", "index.ts");
+      const distCandidate = path.join(cursor, "dist", "extension-bridge", "index.js");
+      const orderedCandidates = isProduction
+        ? isTest
+          ? [distCandidate, srcCandidate]
+          : [distCandidate]
+        : [srcCandidate, distCandidate];
+      for (const candidate of orderedCandidates) {
+        if (fs.existsSync(candidate)) {
+          return candidate;
+        }
+      }
+      const parent = path.dirname(cursor);
+      if (parent === cursor) {
+        break;
+      }
+      cursor = parent;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+};
+
 function buildCacheKey(params: {
   workspaceDir?: string;
   plugins: NormalizedPluginsConfig;
@@ -208,14 +239,18 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
   pushDiagnostics(registry.diagnostics, manifestRegistry.diagnostics);
 
   const pluginSdkAlias = resolvePluginSdkAlias();
+  const extensionBridgeAlias = resolveExtensionBridgeAlias();
+  const alias: Record<string, string> = {};
+  if (pluginSdkAlias) {
+    alias["openclaw/plugin-sdk"] = pluginSdkAlias;
+  }
+  if (extensionBridgeAlias) {
+    alias["openclaw/extension-bridge"] = extensionBridgeAlias;
+  }
   const jiti = createJiti(import.meta.url, {
     interopDefault: true,
     extensions: [".ts", ".tsx", ".mts", ".cts", ".mtsx", ".ctsx", ".js", ".mjs", ".cjs", ".json"],
-    ...(pluginSdkAlias
-      ? {
-          alias: { "openclaw/plugin-sdk": pluginSdkAlias },
-        }
-      : {}),
+    ...(Object.keys(alias).length > 0 ? { alias } : {}),
   });
 
   const manifestByRoot = new Map(

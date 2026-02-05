@@ -26,6 +26,14 @@ export default defineConfig([
     platform: "node",
   },
   {
+    dts: true,
+    entry: "src/extension-bridge/index.ts",
+    outDir: "dist/extension-bridge",
+    env,
+    fixedExtension: false,
+    platform: "node",
+  },
+  {
     entry: "src/extensionAPI.ts",
     env,
     fixedExtension: false,

@@ -11,11 +11,8 @@
 //     /research-view, /research-status
 
 import fs from "node:fs";
-import {
-  registerDiscordButton,
-  resolveDefaultDiscordAccountId,
-  resolveDiscordAccount,
-} from "openclaw/plugin-sdk";
+import { registerDiscordButton } from "openclaw/extension-bridge";
+import { resolveDefaultDiscordAccountId, resolveDiscordAccount } from "openclaw/plugin-sdk";
 import type { CoreDeps, CoreCliDeps } from "./src/core-bridge.js";
 import type { ResearcherPluginConfig, ResearchNotifyConfig } from "./src/types.js";
 import { registerResearcherCli } from "./src/cli.js";
