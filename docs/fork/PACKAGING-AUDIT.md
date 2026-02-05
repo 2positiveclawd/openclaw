@@ -78,15 +78,17 @@ Documented in detail in `docs/fork/LOCAL-PATCHES.md`. Summary:
 
 **File:** `src/plugin-sdk/index.ts` (end of file)
 
-Exports core functions for extensions: `runCronIsolatedAgentTurn`, `loadProviderUsageSummary`, `deliverOutboundPayloads`, `createDefaultDeps`, `registerDiscordComponentFactory`, `GatewayClient`, `GATEWAY_CLIENT_MODES/NAMES`, `createDiscordClient`, `logDebug/logError`, `EventFrame`.
+Exports core functions for extensions: `runCronIsolatedAgentTurn`, `loadProviderUsageSummary`, `deliverOutboundPayloads`, `createDefaultDeps`, `registerDiscordButton`, `DiscordButtonSpec`, `GatewayClient`, `GATEWAY_CLIENT_MODES/NAMES`, `createDiscordClient`, `logDebug/logError`, `EventFrame`.
 
 **Conflict risk:** LOW — appended at end of file.
 
-### Patch 1b: Discord Component Registry (1 new file)
+### Patch 1b: Discord Button Spec Registry (1 new file)
 
-**File:** `src/discord/monitor/component-registry.ts` (NEW, 35 lines)
+**File:** `src/discord/monitor/component-registry.ts` (NEW, ~82 lines)
 
-Generic registry that allows extensions to register Discord button components. Extensions call `registerDiscordComponentFactory()` during plugin registration; the Discord provider calls `drainDiscordComponentFactories()` when building the Carbon Client.
+Spec-based registry for Discord button handlers. Extensions register plain `DiscordButtonSpec` objects (customId, run handler, etc.) during plugin load via `registerDiscordButton()`. The provider calls `drainDiscordButtonSpecs()` at startup and creates real Carbon `Button` subclass instances from the specs using the bundled `@buape/carbon` class.
+
+**Why specs instead of Button instances?** Extensions loaded via jiti resolve `@buape/carbon` from `node_modules/`, while the built `dist/` bundles its own copy. `instanceof Button` checks in Carbon's `ComponentHandler` fail across these two copies. By registering plain objects and creating Button instances in the provider (using the bundled class), `instanceof` checks pass correctly.
 
 **Conflict risk:** NONE — new file, not in upstream.
 
@@ -136,7 +138,7 @@ Formerly mixed into `src/discord/` (core code). **Refactored 2026-02-05:** Butto
 
 ### Pattern
 
-Extensions register button factories via `registerDiscordComponentFactory()` during plugin load. The Discord provider drains the registry when building the Carbon Client. This is a generic mechanism — no fork-specific imports in `provider.ts`.
+Extensions register `DiscordButtonSpec` objects via `registerDiscordButton()` during plugin load. The Discord provider calls `drainDiscordButtonSpecs()` to create real Carbon Button instances from the bundled `@buape/carbon` class (avoiding `instanceof` mismatch between jiti-loaded and bundled code). This is a generic mechanism — no fork-specific imports in `provider.ts`.
 
 **Conflict risk:** LOW — `provider.ts` change is generic (1 import + 1 drain call), not fork-specific.
 

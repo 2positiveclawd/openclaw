@@ -100,15 +100,36 @@ See `docs/fork/AGENTS-GUIDE.md` for complete instructions.
 
 Maps every piece of fork-specific code relative to upstream. The fork adds ~17K lines across 5 layers:
 
-| Layer                           | What                                                                                       | Status                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
-| **Extensions** (6)              | `extensions/{goal-loop,planner,researcher,trend-scout,agent-packs,automation}/`            | Ready — self-contained workspace packages             |
-| **Core Patches** (10 files)     | Plugin-SDK bridge, browser stealth, gateway client                                         | Needs formalization as `.patch` files or upstream PRs |
-| **Discord Additions** (3 files) | `src/discord/monitor/{scout-proposals,researcher-questions}.ts`, `scripts/scout-notify.ts` | Needs refactoring — should move into extensions       |
-| **Supporting Files**            | `docs/fork/`, `deploy/`                                                                    | Ready — already isolated                              |
-| **External Ecosystem**          | Skills at `~/.openclaw/extensions/`, config, wrappers, systemd override                    | Needs setup script for bootstrapping                  |
+| Layer                       | What                                                                            | Status                                                |
+| --------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| **Extensions** (6)          | `extensions/{goal-loop,planner,researcher,trend-scout,agent-packs,automation}/` | Ready — self-contained workspace packages             |
+| **Core Patches** (10 files) | Plugin-SDK bridge, browser stealth, gateway client                              | Needs formalization as `.patch` files or upstream PRs |
+| **Discord Additions**       | Moved to extensions; `scripts/scout-notify.ts` remains as CLI tool              | Done — via generic component registry                 |
+| **Supporting Files**        | `docs/fork/`, `deploy/`                                                         | Ready — already isolated                              |
+| **External Ecosystem**      | Skills at `~/.openclaw/extensions/`, config, wrappers, systemd override         | Needs setup script for bootstrapping                  |
 
 **Agent requirement:** When adding, removing, or restructuring fork-specific code (extensions, core patches, Discord additions, deploy files, skills), update `docs/fork/PACKAGING-AUDIT.md` to reflect the changes.
+
+## Extension Development: jiti/dist instanceof Gotcha
+
+**Full documentation:** See `docs/fork/PACKAGING-AUDIT.md` (Patch 1b) and `src/discord/monitor/component-registry.ts`
+
+Extensions are loaded at runtime via jiti (TypeScript transpiler), which resolves `@buape/carbon` from `node_modules/`. The gateway's built `dist/` bundles its own copy of `@buape/carbon`. These are **different class objects**, so `instanceof` checks across these boundaries **always fail**.
+
+**Rule:** Never pass class instances (e.g., `Button`, `Command`) from jiti-loaded extension code to bundled core code when `instanceof` checks are involved. Use plain spec objects instead.
+
+**Pattern (Discord buttons):**
+
+1. Extension calls `registerDiscordButton({ customId, run, ... })` with a plain `DiscordButtonSpec` object
+2. Provider calls `drainDiscordButtonSpecs()` which creates real `Button` subclass instances using the **bundled** class
+3. Carbon's `ComponentHandler` sees proper `instanceof Button` = `true`
+
+**Key files:**
+
+- `src/discord/monitor/component-registry.ts` — Spec registry + `createButtonFromSpec()`
+- `src/plugin-sdk/index.ts` — Exports `registerDiscordButton`, `DiscordButtonSpec`
+- `extensions/trend-scout/src/discord-buttons.ts` — Uses `createScoutProposalButtonSpec()`
+- `extensions/researcher/src/discord-questions.ts` — Uses `createResearcherQuestionButtonSpec()`
 
 ## Scout-Spec-Ship (System Improvement Playbook)
 
