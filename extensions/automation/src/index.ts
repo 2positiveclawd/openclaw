@@ -20,10 +20,10 @@
 // ---------------------------------------------------------------------------
 
 import type { AutomationEvent, EventType } from "./types.js";
-import { fireWebhooks, testWebhook } from "./webhooks.js";
 import { evaluateChains } from "./chains.js";
 import { loadWebhooks, loadChains, loadTemplates, getTemplate } from "./config.js";
 import { notifyDiscord, saveDiscordConfig, getDiscordConfig } from "./discord.js";
+import { fireWebhooks, testWebhook } from "./webhooks.js";
 
 // Re-export types
 export type {
@@ -105,12 +105,7 @@ export const events = {
     data: { id, goal, status: "running" },
   }),
 
-  goalCompleted: (
-    id: string,
-    goal: string,
-    score: number,
-    duration: number
-  ): AutomationEvent => ({
+  goalCompleted: (id: string, goal: string, score: number, duration: number): AutomationEvent => ({
     type: "goal.completed",
     timestamp: Date.now(),
     data: { id, goal, status: "completed", score, duration },
@@ -138,11 +133,12 @@ export const events = {
     id: string,
     goal: string,
     score: number,
-    duration: number
+    duration: number,
+    assessment?: string,
   ): AutomationEvent => ({
     type: "plan.completed",
     timestamp: Date.now(),
-    data: { id, goal, status: "completed", score, duration },
+    data: { id, goal, status: "completed", score, duration, assessment },
   }),
 
   planFailed: (id: string, goal: string, error?: string): AutomationEvent => ({
@@ -157,11 +153,7 @@ export const events = {
     data: { id, goal, status: "running" },
   }),
 
-  researchCompleted: (
-    id: string,
-    goal: string,
-    duration: number
-  ): AutomationEvent => ({
+  researchCompleted: (id: string, goal: string, duration: number): AutomationEvent => ({
     type: "research.completed",
     timestamp: Date.now(),
     data: { id, goal, status: "completed", duration },

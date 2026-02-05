@@ -3,9 +3,9 @@
 // ---------------------------------------------------------------------------
 
 import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import type { AutomationEvent } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -13,7 +13,7 @@ const execFileAsync = promisify(execFile);
 const OPENCLAW_BIN = process.env.OPENCLAW_BIN || "/home/azureuser/openclaw/openclaw.mjs";
 const CONFIG_FILE = path.join(
   process.env.HOME || "/home/azureuser",
-  ".openclaw/dashboard/discord-notify.json"
+  ".openclaw/dashboard/discord-notify.json",
 );
 
 interface DiscordNotifyConfig {
@@ -56,23 +56,24 @@ function formatMessage(event: AutomationEvent, format: "compact" | "detailed"): 
   if (format === "compact") {
     const score = data.score !== undefined ? ` (${data.score}/100)` : "";
     const duration = data.duration ? ` in ${formatDuration(data.duration)}` : "";
-    return `${emoji} **${title}**${score}${duration}\n\`${data.id}\`: ${truncate(data.goal || "", 100)}`;
+    const assessment = data.assessment ? `\n> ${truncate(String(data.assessment), 300)}` : "";
+    return `${emoji} **${title}**${score}${duration}\n\`${data.id}\`: ${truncate(data.goal || "", 200)}${assessment}`;
   }
 
   // Detailed format
-  const lines = [
-    `${emoji} **${title}**`,
-    `**ID:** \`${data.id}\``,
-  ];
+  const lines = [`${emoji} **${title}**`, `**ID:** \`${data.id}\``];
 
   if (data.goal) {
-    lines.push(`**Goal:** ${truncate(data.goal, 200)}`);
+    lines.push(`**Goal:** ${truncate(data.goal, 400)}`);
   }
   if (data.score !== undefined) {
     lines.push(`**Score:** ${data.score}/100`);
   }
   if (data.duration) {
     lines.push(`**Duration:** ${formatDuration(data.duration)}`);
+  }
+  if (data.assessment) {
+    lines.push(`**Assessment:** ${truncate(String(data.assessment), 500)}`);
   }
   if (data.error) {
     lines.push(`**Error:** ${truncate(data.error, 200)}`);
@@ -144,16 +145,24 @@ export async function notifyDiscord(event: AutomationEvent): Promise<boolean> {
   const message = formatMessage(event, config.format);
 
   try {
-    await execFileAsync("node", [
-      OPENCLAW_BIN,
-      "message", "send",
-      "--channel", "discord",
-      "--target", config.channelId,
-      "--message", message,
-    ], {
-      timeout: 30000,
-      env: { ...process.env, FORCE_COLOR: "0" },
-    });
+    await execFileAsync(
+      "node",
+      [
+        OPENCLAW_BIN,
+        "message",
+        "send",
+        "--channel",
+        "discord",
+        "--target",
+        config.channelId,
+        "--message",
+        message,
+      ],
+      {
+        timeout: 30000,
+        env: { ...process.env, FORCE_COLOR: "0" },
+      },
+    );
 
     console.log(`[automation] Discord notification sent for ${event.type}`);
     return true;

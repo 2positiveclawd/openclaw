@@ -7,17 +7,10 @@
 // evaluator into a single execution flow.
 
 import type { CoreCliDeps, CoreConfig, CoreDeps } from "./core-bridge.js";
-import type {
-  PlannerPluginConfig,
-  PlanNotifyConfig,
-  PlanState,
-  PlanTask,
-} from "./types.js";
-import { readPlan, writePlan, appendTaskStateLog } from "./state.js";
-import { runPlannerAgent, type ParsedPlannerResponse } from "./planner-agent.js";
-import { runWorkerAgent } from "./worker-agent.js";
+import type { PlannerPluginConfig, PlanNotifyConfig, PlanState, PlanTask } from "./types.js";
 import { runFinalEvaluation } from "./evaluator-agent.js";
 import { runGovernanceChecks } from "./governance.js";
+import { runPlannerAgent, type ParsedPlannerResponse } from "./planner-agent.js";
 import {
   validateDag,
   findReadyTasks,
@@ -25,6 +18,8 @@ import {
   analyzeSchedulerState,
   skipDownstreamTasks,
 } from "./scheduler.js";
+import { readPlan, writePlan, appendTaskStateLog } from "./state.js";
+import { runWorkerAgent } from "./worker-agent.js";
 
 // ---------------------------------------------------------------------------
 // Automation (webhooks, chains) - optional, fails silently if not available
@@ -43,7 +38,9 @@ async function loadAutomation() {
 }
 
 async function fireAutomationEvent(
-  eventFn: (mod: typeof import("../../automation/src/index.js")) => import("../../automation/src/index.js").AutomationEvent
+  eventFn: (
+    mod: typeof import("../../automation/src/index.js"),
+  ) => import("../../automation/src/index.js").AutomationEvent,
 ) {
   try {
     const mod = await loadAutomation();
@@ -134,7 +131,9 @@ export async function runPlanOrchestrator(params: {
         ).catch(() => {});
       }
       // Fire automation event: plan.failed
-      await fireAutomationEvent((mod) => mod.events.planFailed(plan.id, plan.goal, plan.stopReason));
+      await fireAutomationEvent((mod) =>
+        mod.events.planFailed(plan.id, plan.goal, plan.stopReason),
+      );
     }
   } finally {
     activePlans.delete(plan.id);
@@ -168,10 +167,7 @@ async function orchestratorBody(
     writePlan(plan);
 
     if (plan.notify) {
-      await ctx.notifyFn(
-        plan.notify,
-        `Plan started: ${plan.goal} [${plan.id}]`,
-      ).catch(() => {});
+      await ctx.notifyFn(plan.notify, `Plan started: ${plan.goal} [${plan.id}]`).catch(() => {});
     }
 
     // Fire automation event: plan.started
@@ -195,10 +191,9 @@ async function orchestratorBody(
       plan.updatedAtMs = Date.now();
       writePlan(plan);
       if (plan.notify) {
-        await ctx.notifyFn(
-          plan.notify,
-          `Plan FAILED: ${plan.goal} [${plan.id}] -- ${plan.stopReason}`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(plan.notify, `Plan FAILED: ${plan.goal} [${plan.id}] -- ${plan.stopReason}`)
+          .catch(() => {});
       }
       return;
     }
@@ -214,10 +209,9 @@ async function orchestratorBody(
       plan.updatedAtMs = Date.now();
       writePlan(plan);
       if (plan.notify) {
-        await ctx.notifyFn(
-          plan.notify,
-          `Plan FAILED: ${plan.goal} [${plan.id}] -- ${plan.stopReason}`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(plan.notify, `Plan FAILED: ${plan.goal} [${plan.id}] -- ${plan.stopReason}`)
+          .catch(() => {});
       }
       return;
     }
@@ -232,10 +226,12 @@ async function orchestratorBody(
     writePlan(plan);
 
     if (plan.notify) {
-      await ctx.notifyFn(
-        plan.notify,
-        `Plan decomposed into ${tasks.length} tasks [${plan.id}]. Starting execution.`,
-      ).catch(() => {});
+      await ctx
+        .notifyFn(
+          plan.notify,
+          `Plan decomposed into ${tasks.length} tasks [${plan.id}]. Starting execution.`,
+        )
+        .catch(() => {});
     }
 
     ctx.logger.info(`Plan ${plan.id}: ${tasks.length} tasks created, starting execution`);
@@ -269,20 +265,16 @@ async function orchestratorBody(
       writePlan(plan);
       ctx.logger.info(`Plan ${plan.id} stopped: ${plan.stopReason}`);
       if (plan.notify) {
-        await ctx.notifyFn(
-          plan.notify,
-          `Plan stopped: ${plan.goal} [${plan.id}] -- ${plan.stopReason}`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(plan.notify, `Plan stopped: ${plan.goal} [${plan.id}] -- ${plan.stopReason}`)
+          .catch(() => {});
       }
       return;
     }
     for (const warning of governance.warnings) {
       ctx.logger.warn(`Plan ${plan.id}: ${warning}`);
       if (plan.notify) {
-        await ctx.notifyFn(
-          plan.notify,
-          `Plan warning [${plan.id}]: ${warning}`,
-        ).catch(() => {});
+        await ctx.notifyFn(plan.notify, `Plan warning [${plan.id}]: ${warning}`).catch(() => {});
       }
     }
 
@@ -397,9 +389,7 @@ async function orchestratorBody(
           // Skip downstream tasks
           const skipped = skipDownstreamTasks(plan.tasks, taskId);
           if (skipped.length > 0) {
-            ctx.logger.info(
-              `Plan ${plan.id}: skipped downstream tasks: ${skipped.join(", ")}`,
-            );
+            ctx.logger.info(`Plan ${plan.id}: skipped downstream tasks: ${skipped.join(", ")}`);
           }
         } else {
           setTaskStatus(plan, taskId, "ready");
@@ -432,12 +422,14 @@ async function orchestratorBody(
 
     if (plan.notify && (batchCompleted > 0 || batchFailed > 0)) {
       const taskState = analyzeSchedulerState(plan.tasks);
-      await ctx.notifyFn(
-        plan.notify,
-        `Plan progress [${plan.id}]: ${taskState.completedCount}/${plan.tasks.length} tasks done` +
-          (taskState.failedCount > 0 ? `, ${taskState.failedCount} failed` : "") +
-          (taskState.skippedCount > 0 ? `, ${taskState.skippedCount} skipped` : ""),
-      ).catch(() => {});
+      await ctx
+        .notifyFn(
+          plan.notify,
+          `Plan progress [${plan.id}]: ${taskState.completedCount}/${plan.tasks.length} tasks done` +
+            (taskState.failedCount > 0 ? `, ${taskState.failedCount} failed` : "") +
+            (taskState.skippedCount > 0 ? `, ${taskState.skippedCount} skipped` : ""),
+        )
+        .catch(() => {});
     }
 
     // Brief pause between batches
@@ -486,16 +478,18 @@ async function orchestratorBody(
 
   ctx.logger.info(`Plan ${plan.id} finished: score ${evalResult.score}/100`);
   if (plan.notify) {
-    await ctx.notifyFn(
-      plan.notify,
-      `Plan COMPLETED: ${plan.goal} [${plan.id}] -- Score: ${evalResult.score}/100. ${evalResult.assessment}`,
-    ).catch(() => {});
+    await ctx
+      .notifyFn(
+        plan.notify,
+        `Plan COMPLETED: ${plan.goal} [${plan.id}] -- Score: ${evalResult.score}/100. ${evalResult.assessment}`,
+      )
+      .catch(() => {});
   }
 
   // Fire automation event: plan.completed
   const duration = Date.now() - (plan.usage.startedAtMs || Date.now());
   await fireAutomationEvent((mod) =>
-    mod.events.planCompleted(plan.id, plan.goal, evalResult.score, duration)
+    mod.events.planCompleted(plan.id, plan.goal, evalResult.score, duration, evalResult.assessment),
   );
 }
 
@@ -525,10 +519,9 @@ async function handleReplan(
   writePlan(plan);
 
   if (plan.notify) {
-    await ctx.notifyFn(
-      plan.notify,
-      `Re-planning triggered for [${plan.id}]: adjusting task strategy.`,
-    ).catch(() => {});
+    await ctx
+      .notifyFn(plan.notify, `Re-planning triggered for [${plan.id}]: adjusting task strategy.`)
+      .catch(() => {});
   }
 
   const replanResult = await runPlannerAgent({
@@ -562,9 +555,7 @@ async function handleReplan(
 
   const validation = validateDag(mergedTasks);
   if (!validation.valid) {
-    ctx.logger.warn(
-      `Plan ${plan.id}: replanned DAG is invalid: ${validation.errors.join("; ")}`,
-    );
+    ctx.logger.warn(`Plan ${plan.id}: replanned DAG is invalid: ${validation.errors.join("; ")}`);
     plan.currentPhase = "executing";
     plan.updatedAtMs = Date.now();
     writePlan(plan);
@@ -588,10 +579,7 @@ async function handleReplan(
 // Helpers
 // ---------------------------------------------------------------------------
 
-function applyParsedTasks(
-  parsed: ParsedPlannerResponse,
-  maxRetries: number,
-): PlanTask[] {
+function applyParsedTasks(parsed: ParsedPlannerResponse, maxRetries: number): PlanTask[] {
   return parsed.tasks.map((t) => ({
     id: t.id,
     title: t.title,
@@ -604,11 +592,7 @@ function applyParsedTasks(
   }));
 }
 
-function setTaskStatus(
-  plan: PlanState,
-  taskId: string,
-  newStatus: PlanTask["status"],
-): void {
+function setTaskStatus(plan: PlanState, taskId: string, newStatus: PlanTask["status"]): void {
   const task = plan.tasks.find((t) => t.id === taskId);
   if (!task) return;
   const fromStatus = task.status;
