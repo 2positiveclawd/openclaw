@@ -1,0 +1,824 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.2.2",
+    "lastTouchedAt": "2026-02-04T18:00:35.252Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-02-04T18:00:35.236Z",
+    "lastRunVersion": "2026.2.2",
+    "lastRunCommand": "doctor",
+    "lastRunMode": "local"
+  },
+  "browser": {
+    "enabled": true,
+    "evaluateEnabled": false,
+    "headless": true,
+    "noSandbox": false,
+    "defaultProfile": "openclaw",
+    "profiles": {
+      "openclaw": {
+        "cdpPort": 18800,
+        "color": "#FF4500"
+      }
+    },
+    "stealth": true
+  },
+  "auth": {
+    "profiles": {
+      "openai-codex:default": {
+        "provider": "openai-codex",
+        "mode": "oauth"
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "azure": {
+        "baseUrl": "__AZURE_OPENAI_ENDPOINT__",
+        "api": "openai-responses",
+        "models": [
+          {
+            "id": "gpt-5-nano",
+            "name": "GPT-5 Nano",
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "contextWindow": 128000,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "openai-codex/gpt-5.2"
+      },
+      "models": {
+        "openai-codex/gpt-5.2": {},
+        "openai-codex/gpt-5.2-codex": {
+          "alias": "code"
+        }
+      },
+      "workspace": "/home/azureuser/.openclaw/workspace",
+      "memorySearch": {
+        "enabled": true,
+        "sources": [
+          "memory",
+          "sessions"
+        ],
+        "extraPaths": [
+          "/home/azureuser/.openclaw/workspace/memory/knowledge"
+        ],
+        "provider": "openai",
+        "remote": {
+          "baseUrl": "__REDACTED_ENDPOINT__"
+        },
+        "fallback": "local",
+        "sync": {
+          "onSessionStart": true,
+          "watch": true,
+          "intervalMinutes": 60
+        },
+        "query": {
+          "maxResults": 10,
+          "minScore": 0.5
+        }
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "thinkingDefault": "high",
+      "heartbeat": {
+        "every": "2h",
+        "activeHours": {
+          "start": "08:00",
+          "end": "23:00"
+        },
+        "model": "azure/gpt-5-nano"
+      },
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      }
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "identity": {
+          "name": "OpenClawd",
+          "emoji": "🤖"
+        },
+        "subagents": {
+          "allowAgents": [
+            "travel",
+            "researcher",
+            "executor",
+            "qa",
+            "ba-product",
+            "designer-ux"
+          ]
+        }
+      },
+      {
+        "id": "travel",
+        "workspace": "/home/azureuser/.openclaw/workspace-travel",
+        "agentDir": "/home/azureuser/.openclaw/agents/travel/agent",
+        "identity": {
+          "name": "Travel",
+          "emoji": "✈️"
+        },
+        "subagents": {
+          "allowAgents": [
+            "researcher",
+            "executor"
+          ]
+        }
+      },
+      {
+        "id": "researcher",
+        "workspace": "/home/azureuser/.openclaw/workspace-researcher",
+        "agentDir": "/home/azureuser/.openclaw/agents/researcher/agent",
+        "identity": {
+          "name": "Researcher",
+          "emoji": "🔬"
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "web_search",
+            "web_fetch",
+            "memory_search"
+          ],
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "browser",
+            "gateway",
+            "cron",
+            "message",
+            "canvas"
+          ]
+        }
+      },
+      {
+        "id": "executor",
+        "workspace": "/home/azureuser/.openclaw/workspace-executor",
+        "agentDir": "/home/azureuser/.openclaw/agents/executor/agent",
+        "model": {
+          "primary": "openai-codex/gpt-5.2-codex"
+        },
+        "identity": {
+          "name": "Executor",
+          "emoji": "⚡"
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "write",
+            "edit",
+            "apply_patch",
+            "exec",
+            "process",
+            "web_search",
+            "web_fetch",
+            "browser",
+            "message"
+          ],
+          "deny": [
+            "gateway",
+            "cron",
+            "canvas"
+          ]
+        }
+      },
+      {
+        "id": "qa",
+        "workspace": "/home/azureuser/.openclaw/workspace-qa",
+        "agentDir": "/home/azureuser/.openclaw/agents/qa/agent",
+        "identity": {
+          "name": "QA",
+          "emoji": "🧪"
+        },
+        "tools": {
+          "allow": [
+            "read",
+            "exec",
+            "web_fetch",
+            "browser"
+          ],
+          "deny": [
+            "write",
+            "edit",
+            "apply_patch",
+            "gateway",
+            "cron",
+            "message",
+            "canvas"
+          ]
+        }
+      },
+      {
+        "id": "mia-strategist",
+        "workspace": "/home/azureuser/.openclaw/workspace-mia-strategist",
+        "identity": {
+          "name": "Mia",
+          "emoji": "📋"
+        }
+      },
+      {
+        "id": "blake-scriptwriter",
+        "workspace": "/home/azureuser/.openclaw/workspace-blake-scriptwriter",
+        "identity": {
+          "name": "Blake",
+          "emoji": "🎬"
+        }
+      },
+      {
+        "id": "jordan-social",
+        "workspace": "/home/azureuser/.openclaw/workspace-jordan-social",
+        "identity": {
+          "name": "Jordan",
+          "emoji": "📱"
+        }
+      },
+      {
+        "id": "marcus-techlead",
+        "workspace": "/home/azureuser/.openclaw/workspace-marcus-techlead",
+        "identity": {
+          "name": "Marcus",
+          "emoji": "🏗️"
+        }
+      },
+      {
+        "id": "elena-reviewer",
+        "workspace": "/home/azureuser/.openclaw/workspace-elena-reviewer",
+        "identity": {
+          "name": "Elena",
+          "emoji": "🔍"
+        }
+      },
+      {
+        "id": "sam-docs",
+        "workspace": "/home/azureuser/.openclaw/workspace-sam-docs",
+        "identity": {
+          "name": "Sam",
+          "emoji": "📚"
+        }
+      },
+      {
+        "id": "claire-assistant",
+        "workspace": "/home/azureuser/.openclaw/workspace-claire-assistant",
+        "identity": {
+          "name": "Claire",
+          "emoji": "📅"
+        }
+      },
+      {
+        "id": "leo-researcher",
+        "workspace": "/home/azureuser/.openclaw/workspace-leo-researcher",
+        "identity": {
+          "name": "Leo",
+          "emoji": "🔬"
+        }
+      },
+      {
+        "id": "harper-outreach",
+        "workspace": "/home/azureuser/.openclaw/workspace-harper-outreach",
+        "identity": {
+          "name": "Harper",
+          "emoji": "✉️"
+        }
+      },
+      {
+        "id": "noah-coach",
+        "workspace": "/home/azureuser/.openclaw/workspace-noah-coach",
+        "identity": {
+          "name": "Noah",
+          "emoji": "💪"
+        }
+      },
+      {
+        "id": "nina-nutrition",
+        "workspace": "/home/azureuser/.openclaw/workspace-nina-nutrition",
+        "identity": {
+          "name": "Nina",
+          "emoji": "🥗"
+        }
+      },
+      {
+        "id": "ethan-accountability",
+        "workspace": "/home/azureuser/.openclaw/workspace-ethan-accountability",
+        "identity": {
+          "name": "Ethan",
+          "emoji": "✅"
+        }
+      },
+      {
+        "id": "olivia-wellness",
+        "workspace": "/home/azureuser/.openclaw/workspace-olivia-wellness",
+        "identity": {
+          "name": "Olivia",
+          "emoji": "🧘"
+        }
+      },
+      {
+        "id": "mason-sleep",
+        "workspace": "/home/azureuser/.openclaw/workspace-mason-sleep",
+        "identity": {
+          "name": "Mason",
+          "emoji": "😴"
+        }
+      },
+      {
+        "id": "priya-habits",
+        "workspace": "/home/azureuser/.openclaw/workspace-priya-habits",
+        "identity": {
+          "name": "Priya",
+          "emoji": "🎯"
+        }
+      },
+      {
+        "id": "sophia-invoices",
+        "workspace": "/home/azureuser/.openclaw/workspace-sophia-invoices",
+        "identity": {
+          "name": "Sophia",
+          "emoji": "💵"
+        }
+      },
+      {
+        "id": "liam-expenses",
+        "workspace": "/home/azureuser/.openclaw/workspace-liam-expenses",
+        "identity": {
+          "name": "Liam",
+          "emoji": "🧾"
+        }
+      },
+      {
+        "id": "nora-tax",
+        "workspace": "/home/azureuser/.openclaw/workspace-nora-tax",
+        "identity": {
+          "name": "Nora",
+          "emoji": "📊"
+        }
+      },
+      {
+        "id": "ba-product",
+        "workspace": "/home/azureuser/.openclaw/workspace-ba-product",
+        "identity": {
+          "name": "Specwarden",
+          "emoji": "🧾"
+        }
+      },
+      {
+        "id": "designer-ux",
+        "workspace": "/home/azureuser/.openclaw/workspace-designer-ux",
+        "identity": {
+          "name": "Driftwood",
+          "emoji": "🎛️"
+        }
+      }
+    ]
+  },
+  "tools": {
+    "exec": {
+      "security": "full",
+      "ask": "off"
+    }
+  },
+  "bindings": [
+    {
+      "agentId": "travel",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468187098853937213"
+        }
+      }
+    },
+    {
+      "agentId": "researcher",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468187106101952614"
+        }
+      }
+    },
+    {
+      "agentId": "executor",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468187182790344857"
+        }
+      }
+    },
+    {
+      "agentId": "mia-strategist",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554279093669888"
+        }
+      }
+    },
+    {
+      "agentId": "blake-scriptwriter",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554280414875700"
+        }
+      }
+    },
+    {
+      "agentId": "jordan-social",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554281585213561"
+        }
+      }
+    },
+    {
+      "agentId": "marcus-techlead",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554339449573521"
+        }
+      }
+    },
+    {
+      "agentId": "elena-reviewer",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554340783362151"
+        }
+      }
+    },
+    {
+      "agentId": "sam-docs",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554342746427392"
+        }
+      }
+    },
+    {
+      "agentId": "claire-assistant",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554345468399738"
+        }
+      }
+    },
+    {
+      "agentId": "leo-researcher",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554347662020680"
+        }
+      }
+    },
+    {
+      "agentId": "harper-outreach",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554348639555585"
+        }
+      }
+    },
+    {
+      "agentId": "noah-coach",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554428670808066"
+        }
+      }
+    },
+    {
+      "agentId": "nina-nutrition",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554430138945580"
+        }
+      }
+    },
+    {
+      "agentId": "ethan-accountability",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554431363678343"
+        }
+      }
+    },
+    {
+      "agentId": "olivia-wellness",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554433242857671"
+        }
+      }
+    },
+    {
+      "agentId": "mason-sleep",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554434538766398"
+        }
+      }
+    },
+    {
+      "agentId": "priya-habits",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554435553660939"
+        }
+      }
+    },
+    {
+      "agentId": "sophia-invoices",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554437856464896"
+        }
+      }
+    },
+    {
+      "agentId": "liam-expenses",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554439173607651"
+        }
+      }
+    },
+    {
+      "agentId": "nora-tax",
+      "match": {
+        "channel": "discord",
+        "peer": {
+          "kind": "channel",
+          "id": "1468554440582893599"
+        }
+      }
+    }
+  ],
+  "messages": {
+    "ackReactionScope": "group-all"
+  },
+  "commands": {
+    "native": "auto",
+    "nativeSkills": "auto"
+  },
+  "hooks": {
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "command-logger": {
+          "enabled": true
+        },
+        "session-memory": {
+          "enabled": true
+        },
+        "boot-md": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "token": "__DISCORD_BOT_TOKEN__",
+      "groupPolicy": "allowlist",
+      "dm": {
+        "enabled": true,
+        "policy": "allowlist",
+        "allowFrom": [
+          "302826080664813578"
+        ]
+      },
+      "guilds": {
+        "1465018939942895618": {
+          "requireMention": false,
+          "channels": {
+            "1468554279093669888": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554280414875700": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554281585213561": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554339449573521": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554340783362151": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554342746427392": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554345468399738": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554347662020680": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554348639555585": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554428670808066": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554430138945580": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554431363678343": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554433242857671": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554434538766398": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554435553660939": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554437856464896": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554439173607651": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468554440582893599": {
+              "allow": true,
+              "requireMention": false
+            },
+            "1468187098853937213": {
+              "allow": true,
+              "requireMention": true
+            },
+            "1468338159883390986": {
+              "allow": true,
+              "requireMention": true
+            },
+            "1468187106101952614": {
+              "allow": true,
+              "requireMention": true
+            },
+            "1468187182790344857": {
+              "allow": true,
+              "requireMention": true
+            },
+            "1465020695326097531": {
+              "allow": true,
+              "requireMention": true
+            },
+            "1467171219265687807": {
+              "allow": true,
+              "requireMention": true
+            },
+            "1467151511455797288": {
+              "allow": true,
+              "requireMention": true
+            },
+            "1468940383630262427": {
+              "allow": true,
+              "requireMention": false
+            }
+          }
+        }
+      },
+      "execApprovals": {
+        "enabled": true,
+        "approvers": [
+          "302826080664813578"
+        ],
+        "agentFilter": [
+          "main"
+        ]
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "__GATEWAY_TOKEN__"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    }
+  },
+  "skills": {
+    "install": {
+      "nodeManager": "npm"
+    },
+    "entries": {
+      "notion": {
+        "apiKey": "__REDACTED_API_KEY__"
+      }
+    }
+  },
+  "plugins": {
+    "entries": {
+      "discord": {
+        "enabled": true
+      },
+      "goal-loop": {
+        "enabled": true
+      },
+      "goal-skill": {
+        "enabled": true
+      },
+      "plan-skill": {
+        "enabled": true
+      },
+      "research-skill": {
+        "enabled": true
+      },
+      "planner": {
+        "enabled": true
+      },
+      "researcher": {
+        "enabled": true
+      },
+      "trend-scout": {
+        "enabled": true
+      },
+      "agent-packs": {
+        "enabled": true
+      }
+    }
+  }
+}

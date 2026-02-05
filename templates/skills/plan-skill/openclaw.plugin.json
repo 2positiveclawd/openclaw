@@ -1,0 +1,11 @@
+{
+  "id": "plan-skill",
+  "name": "Plan Skill",
+  "description": "Agent skill for managing planner task decomposition via /plan",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

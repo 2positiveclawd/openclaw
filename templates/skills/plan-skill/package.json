@@ -1,0 +1,11 @@
+{
+  "name": "plan-skill",
+  "version": "1.0.0",
+  "description": "Skill pack for managing openclaw planner task decomposition",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

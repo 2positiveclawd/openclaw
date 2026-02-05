@@ -1,0 +1,11 @@
+{
+  "id": "goal-skill",
+  "name": "Goal Skill",
+  "description": "Agent skill for managing goal-directed loops via /goal",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

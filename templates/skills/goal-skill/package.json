@@ -1,0 +1,11 @@
+{
+  "name": "goal-skill",
+  "version": "1.0.0",
+  "description": "Skill pack for managing openclaw goal-directed agent loops",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

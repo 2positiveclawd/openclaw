@@ -1,0 +1,11 @@
+{
+  "name": "research-skill",
+  "version": "1.0.0",
+  "description": "Skill pack for managing openclaw researcher interviews and PRD generation",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

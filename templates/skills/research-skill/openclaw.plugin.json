@@ -1,0 +1,11 @@
+{
+  "id": "research-skill",
+  "name": "Research Skill",
+  "description": "Agent skill for research, interview, and PRD generation via /research",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}
