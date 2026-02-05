@@ -6,6 +6,11 @@
   "devDependencies": {
     "openclaw": "workspace:*"
   },
+  "peerDependencies": {
+    "@buape/carbon": "*",
+    "discord-api-types": "*",
+    "openclaw": "*"
+  },
   "openclaw": {
     "extensions": [
       "./index.ts"

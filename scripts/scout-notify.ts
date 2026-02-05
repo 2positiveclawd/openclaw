@@ -11,13 +11,13 @@
 //    or: node --import tsx scripts/scout-notify.ts
 
 import { ButtonStyle, Routes } from "discord-api-types/v10";
-import { loadConfig } from "../src/config/config.js";
 import {
   buildScoutProposalCustomId,
   readRegistry,
   writeRegistry,
   type ScoutProposal,
-} from "../src/discord/monitor/scout-proposals.js";
+} from "../extensions/trend-scout/src/discord-buttons.js";
+import { loadConfig } from "../src/config/config.js";
 import { createDiscordClient } from "../src/discord/send.shared.js";
 
 // ---------------------------------------------------------------------------

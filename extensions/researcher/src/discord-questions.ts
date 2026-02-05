@@ -5,14 +5,18 @@
 // Sends interview questions as Discord embeds with buttons for answering.
 // Similar to exec-approvals.ts but for researcher interview flow.
 
+import type { OpenClawConfig } from "openclaw/plugin-sdk";
 import { Button, type ButtonInteraction, type ComponentData } from "@buape/carbon";
 import { ButtonStyle, Routes } from "discord-api-types/v10";
-import type { OpenClawConfig } from "../../config/config.js";
-import type { EventFrame } from "../../gateway/protocol/index.js";
-import { GatewayClient } from "../../gateway/client.js";
-import { logDebug, logError } from "../../logger.js";
-import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../utils/message-channel.js";
-import { createDiscordClient } from "../send.shared.js";
+import {
+  type EventFrame,
+  GatewayClient,
+  GATEWAY_CLIENT_MODES,
+  GATEWAY_CLIENT_NAMES,
+  createDiscordClient,
+  logDebug,
+  logError,
+} from "openclaw/plugin-sdk";
 
 const RESEARCHER_KEY = "researchq";
 
@@ -33,16 +37,6 @@ export type ResearcherAnswerEvent = {
   researchId: string;
   answers: string[];
   answeredBy?: string;
-};
-
-type PendingQuestions = {
-  researchId: string;
-  discordMessageId: string;
-  discordChannelId: string;
-  questions: string[];
-  options: Array<Array<string>>;
-  selectedAnswers: Map<number, string>; // questionIndex -> selected answer
-  timeoutId: NodeJS.Timeout;
 };
 
 function encodeCustomIdValue(value: string): string {
@@ -77,9 +71,7 @@ export function buildResearcherSkipCustomId(researchId: string): string {
   return `${RESEARCHER_KEY}:id=${encodeCustomIdValue(researchId)};skip=1`;
 }
 
-export function parseResearcherQuestionData(
-  data: ComponentData,
-): {
+export function parseResearcherQuestionData(data: ComponentData): {
   researchId: string;
   questionIndex?: number;
   optionIndex?: number;
@@ -227,8 +219,8 @@ function formatCompletedEmbed(
 function formatSkippedEmbed(event: ResearcherQuestionsEvent) {
   return {
     title: "Research Interview: Skipped",
-    description: "Proceeding with default assumptions.",
-    color: 0x99aab5, // Gray
+    description: "User chose to skip the interview. Default values will be used.",
+    color: 0xfee75c, // Yellow
     fields: [
       {
         name: "Goal",
@@ -323,6 +315,16 @@ export type DiscordResearcherQuestionsHandlerOpts = {
   gatewayUrl?: string;
   gatewayToken?: string;
   cfg: OpenClawConfig;
+};
+
+type PendingQuestions = {
+  researchId: string;
+  discordMessageId: string;
+  discordChannelId: string;
+  questions: string[];
+  options: string[][];
+  selectedAnswers: Map<number, string>;
+  timeoutId: ReturnType<typeof setTimeout>;
 };
 
 export class DiscordResearcherQuestionsHandler {

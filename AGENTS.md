@@ -94,6 +94,22 @@ systemctl --user restart openclaw-gateway
 
 See `docs/fork/AGENTS-GUIDE.md` for complete instructions.
 
+## Fork Organization & Packaging
+
+**Full documentation:** See `docs/fork/PACKAGING-AUDIT.md`
+
+Maps every piece of fork-specific code relative to upstream. The fork adds ~17K lines across 5 layers:
+
+| Layer                           | What                                                                                       | Status                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------- |
+| **Extensions** (6)              | `extensions/{goal-loop,planner,researcher,trend-scout,agent-packs,automation}/`            | Ready — self-contained workspace packages             |
+| **Core Patches** (10 files)     | Plugin-SDK bridge, browser stealth, gateway client                                         | Needs formalization as `.patch` files or upstream PRs |
+| **Discord Additions** (3 files) | `src/discord/monitor/{scout-proposals,researcher-questions}.ts`, `scripts/scout-notify.ts` | Needs refactoring — should move into extensions       |
+| **Supporting Files**            | `docs/fork/`, `deploy/`                                                                    | Ready — already isolated                              |
+| **External Ecosystem**          | Skills at `~/.openclaw/extensions/`, config, wrappers, systemd override                    | Needs setup script for bootstrapping                  |
+
+**Agent requirement:** When adding, removing, or restructuring fork-specific code (extensions, core patches, Discord additions, deploy files, skills), update `docs/fork/PACKAGING-AUDIT.md` to reflect the changes.
+
 ## Scout-Spec-Ship (System Improvement Playbook)
 
 **Full documentation:** See `docs/fork/SCOUT-SPEC-SHIP.md`

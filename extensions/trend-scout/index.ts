@@ -17,17 +17,13 @@
 //
 // ---------------------------------------------------------------------------
 
+import type { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
-import type { Command } from "commander";
-
+import { registerDiscordComponentFactory } from "openclaw/plugin-sdk";
+import { createScoutProposalButton } from "./src/discord-buttons.js";
+import { runTrendScout, getRecentDigests, loadConfig, saveConfig } from "./src/scout-service.js";
 import { DEFAULT_CONFIG } from "./src/types.js";
-import {
-  runTrendScout,
-  getRecentDigests,
-  loadConfig,
-  saveConfig,
-} from "./src/scout-service.js";
 
 // Store reference for cleanup
 let schedulerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -75,112 +71,114 @@ const trendScoutPlugin = {
     // -------------------------------------------------------------------
     // 1. Register CLI commands
     // -------------------------------------------------------------------
-    api.registerCli(({ program }) => {
-      const cmd = program
-        .command("trend-scout")
-        .description("Autonomous trend monitoring agent");
+    api.registerCli(
+      ({ program }) => {
+        const cmd = program.command("trend-scout").description("Autonomous trend monitoring agent");
 
-      // Run a scan
-      cmd
-        .command("run")
-        .description("Run a trend scan now")
-        .option("--notify", "Send Discord notification", false)
-        .option("--skip-llm", "Skip LLM analysis (faster, less insightful)", false)
-        .option("--topics <topics>", "Override topics (comma-separated)")
-        .action(async (opts) => {
-          console.log("🔍 Starting Trend Scout scan...\n");
+        // Run a scan
+        cmd
+          .command("run")
+          .description("Run a trend scan now")
+          .option("--notify", "Send Discord notification", false)
+          .option("--skip-llm", "Skip LLM analysis (faster, less insightful)", false)
+          .option("--topics <topics>", "Override topics (comma-separated)")
+          .action(async (opts) => {
+            console.log("🔍 Starting Trend Scout scan...\n");
 
-          const overrides: Record<string, unknown> = {};
-          if (opts.topics) {
-            overrides.topics = opts.topics.split(",").map((t: string) => t.trim());
-          }
+            const overrides: Record<string, unknown> = {};
+            if (opts.topics) {
+              overrides.topics = opts.topics.split(",").map((t: string) => t.trim());
+            }
 
-          const result = await runTrendScout(overrides, {
-            notify: opts.notify,
-            skipLLM: opts.skipLlm,
+            const result = await runTrendScout(overrides, {
+              notify: opts.notify,
+              skipLLM: opts.skipLlm,
+            });
+
+            if (result.success && result.digest) {
+              console.log("\n✅ Scan complete!\n");
+              console.log(
+                `📊 Found ${result.stats.fetched} items, ${result.stats.relevant} relevant\n`,
+              );
+              console.log("📝 Summary:");
+              console.log(result.digest.summary);
+              console.log("\n💡 Key Insights:");
+              result.digest.insights.forEach((i) => console.log(`  • ${i}`));
+              console.log("\n🎯 Opportunities:");
+              result.digest.opportunities.forEach((o) => console.log(`  • ${o}`));
+              console.log(`\n📁 Saved to: ${result.memoryPath}`);
+            } else {
+              console.error("❌ Scan failed:", result.error);
+              process.exit(1);
+            }
           });
 
-          if (result.success && result.digest) {
-            console.log("\n✅ Scan complete!\n");
-            console.log(`📊 Found ${result.stats.fetched} items, ${result.stats.relevant} relevant\n`);
-            console.log("📝 Summary:");
-            console.log(result.digest.summary);
-            console.log("\n💡 Key Insights:");
-            result.digest.insights.forEach((i) => console.log(`  • ${i}`));
-            console.log("\n🎯 Opportunities:");
-            result.digest.opportunities.forEach((o) => console.log(`  • ${o}`));
-            console.log(`\n📁 Saved to: ${result.memoryPath}`);
-          } else {
-            console.error("❌ Scan failed:", result.error);
-            process.exit(1);
-          }
-        });
+        // Show status
+        cmd
+          .command("status")
+          .description("Show recent trend digests")
+          .option("-n, --days <n>", "Number of days to show", "7")
+          .action((opts) => {
+            const digests = getRecentDigests(parseInt(opts.days, 10));
 
-      // Show status
-      cmd
-        .command("status")
-        .description("Show recent trend digests")
-        .option("-n, --days <n>", "Number of days to show", "7")
-        .action((opts) => {
-          const digests = getRecentDigests(parseInt(opts.days, 10));
+            if (digests.length === 0) {
+              console.log("No trend digests found. Run 'openclaw trend-scout run' to create one.");
+              return;
+            }
 
-          if (digests.length === 0) {
-            console.log("No trend digests found. Run 'openclaw trend-scout run' to create one.");
-            return;
-          }
+            console.log(`📊 Recent Trend Digests (last ${opts.days} days)\n`);
+            console.log("─".repeat(60));
 
-          console.log(`📊 Recent Trend Digests (last ${opts.days} days)\n`);
-          console.log("─".repeat(60));
+            for (const digest of digests) {
+              console.log(`\n📅 ${digest.date}`);
+              console.log(`   Items: ${digest.items.length} | Topics: ${digest.topics.length}`);
+              console.log(`   Summary: ${digest.summary.slice(0, 100)}...`);
+            }
+          });
 
-          for (const digest of digests) {
-            console.log(`\n📅 ${digest.date}`);
-            console.log(`   Items: ${digest.items.length} | Topics: ${digest.topics.length}`);
-            console.log(`   Summary: ${digest.summary.slice(0, 100)}...`);
-          }
-        });
+        // Show/edit config
+        cmd
+          .command("config")
+          .description("Show or update configuration")
+          .option("--topics <topics>", "Set topics (comma-separated)")
+          .option("--subreddits <subs>", "Set subreddits (comma-separated)")
+          .option("--languages <langs>", "Set GitHub languages (comma-separated)")
+          .option("--reset", "Reset to default configuration")
+          .action((opts) => {
+            if (opts.reset) {
+              saveConfig(DEFAULT_CONFIG);
+              console.log("✅ Configuration reset to defaults");
+              return;
+            }
 
-      // Show/edit config
-      cmd
-        .command("config")
-        .description("Show or update configuration")
-        .option("--topics <topics>", "Set topics (comma-separated)")
-        .option("--subreddits <subs>", "Set subreddits (comma-separated)")
-        .option("--languages <langs>", "Set GitHub languages (comma-separated)")
-        .option("--reset", "Reset to default configuration")
-        .action((opts) => {
-          if (opts.reset) {
-            saveConfig(DEFAULT_CONFIG);
-            console.log("✅ Configuration reset to defaults");
-            return;
-          }
+            const config = loadConfig();
 
-          const config = loadConfig();
+            if (opts.topics) {
+              config.topics = opts.topics.split(",").map((t: string) => t.trim());
+            }
+            if (opts.subreddits) {
+              config.subreddits = opts.subreddits.split(",").map((s: string) => s.trim());
+            }
+            if (opts.languages) {
+              config.languages = opts.languages.split(",").map((l: string) => l.trim());
+            }
 
-          if (opts.topics) {
-            config.topics = opts.topics.split(",").map((t: string) => t.trim());
-          }
-          if (opts.subreddits) {
-            config.subreddits = opts.subreddits.split(",").map((s: string) => s.trim());
-          }
-          if (opts.languages) {
-            config.languages = opts.languages.split(",").map((l: string) => l.trim());
-          }
+            if (opts.topics || opts.subreddits || opts.languages) {
+              saveConfig(config);
+              console.log("✅ Configuration updated");
+            }
 
-          if (opts.topics || opts.subreddits || opts.languages) {
-            saveConfig(config);
-            console.log("✅ Configuration updated");
-          }
-
-          console.log("\n📋 Current Configuration:\n");
-          console.log(`Topics: ${config.topics.join(", ")}`);
-          console.log(`Subreddits: ${config.subreddits.join(", ")}`);
-          console.log(`Languages: ${config.languages.join(", ")}`);
-          console.log(`Items per source: ${config.itemsPerSource}`);
-          console.log(`Min score: ${config.minScore}`);
-          console.log(`Hours back: ${config.hoursBack}`);
-        });
-
-    }, { commands: ["trend-scout"] });
+            console.log("\n📋 Current Configuration:\n");
+            console.log(`Topics: ${config.topics.join(", ")}`);
+            console.log(`Subreddits: ${config.subreddits.join(", ")}`);
+            console.log(`Languages: ${config.languages.join(", ")}`);
+            console.log(`Items per source: ${config.itemsPerSource}`);
+            console.log(`Min score: ${config.minScore}`);
+            console.log(`Hours back: ${config.hoursBack}`);
+          });
+      },
+      { commands: ["trend-scout"] },
+    );
 
     // -------------------------------------------------------------------
     // 2. Register HTTP endpoints
@@ -192,12 +190,14 @@ const trendScoutPlugin = {
         const config = loadConfig();
 
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({
-          ok: true,
-          config,
-          recentDigests: digests.length,
-          latestDate: digests[0]?.date || null,
-        }));
+        res.end(
+          JSON.stringify({
+            ok: true,
+            config,
+            recentDigests: digests.length,
+            latestDate: digests[0]?.date || null,
+          }),
+        );
       },
     });
 
@@ -260,7 +260,7 @@ const trendScoutPlugin = {
         const msUntilNext = next9am.getTime() - now.getTime();
 
         serviceLogger.info(
-          `Next scheduled scan at ${next9am.toISOString()} (in ${Math.round(msUntilNext / 60000)} minutes)`
+          `Next scheduled scan at ${next9am.toISOString()} (in ${Math.round(msUntilNext / 60000)} minutes)`,
         );
 
         // Schedule first run
@@ -319,6 +319,9 @@ const trendScoutPlugin = {
       },
     });
 
+    // Register Discord button component for scout proposal approval
+    registerDiscordComponentFactory(() => createScoutProposalButton());
+
     logger.info("Trend Scout extension loaded");
   },
 };
@@ -329,7 +332,8 @@ const trendScoutPlugin = {
 // Updates HEARTBEAT.md in workspace with trend-related tasks for the agent
 
 async function updateHeartbeatFile(result: Awaited<ReturnType<typeof runTrendScout>>) {
-  const workspaceDir = process.env.OPENCLAW_WORKSPACE ||
+  const workspaceDir =
+    process.env.OPENCLAW_WORKSPACE ||
     path.join(process.env.HOME || "/home/azureuser", ".openclaw/workspace");
   const heartbeatPath = path.join(workspaceDir, "HEARTBEAT.md");
 
@@ -363,11 +367,7 @@ async function updateHeartbeatFile(result: Awaited<ReturnType<typeof runTrendSco
 }
 
 function buildTrendHeartbeatSection(result: Awaited<ReturnType<typeof runTrendScout>>): string {
-  const lines: string[] = [
-    "<!-- trend-scout-start -->",
-    "## Trend Scout",
-    "",
-  ];
+  const lines: string[] = ["<!-- trend-scout-start -->", "## Trend Scout", ""];
 
   if (result.success && result.digest) {
     const digest = result.digest;

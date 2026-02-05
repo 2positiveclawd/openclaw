@@ -11,10 +11,19 @@
 //     /research-view, /research-status
 
 import fs from "node:fs";
+import {
+  registerDiscordComponentFactory,
+  resolveDefaultDiscordAccountId,
+  resolveDiscordAccount,
+} from "openclaw/plugin-sdk";
 import type { CoreDeps, CoreCliDeps } from "./src/core-bridge.js";
 import type { ResearcherPluginConfig, ResearchNotifyConfig } from "./src/types.js";
 import { registerResearcherCli } from "./src/cli.js";
 import { loadCoreDeps } from "./src/core-bridge.js";
+import {
+  createResearcherQuestionButton,
+  DiscordResearcherQuestionsHandler,
+} from "./src/discord-questions.js";
 import {
   getActiveResearchIds,
   isResearchRunning,
@@ -160,6 +169,58 @@ const researcherPlugin = {
     };
 
     // -------------------------------------------------------------------
+    // 0. Discord researcher questions handler (button-based interviews)
+    // -------------------------------------------------------------------
+    let researcherQuestionsHandler: DiscordResearcherQuestionsHandler | null = null;
+
+    try {
+      const discordAccountId = resolveDefaultDiscordAccountId(api.config);
+      if (discordAccountId) {
+        const discordAccount = resolveDiscordAccount({
+          cfg: api.config,
+          accountId: discordAccountId,
+        });
+        const discordCfg =
+          (api.config as Record<string, unknown>).discord &&
+          typeof (api.config as Record<string, unknown>).discord === "object"
+            ? ((
+                (api.config as Record<string, Record<string, unknown>>).discord?.accounts as
+                  | Record<string, Record<string, unknown>>
+                  | undefined
+              )?.[discordAccountId] ?? {})
+            : {};
+        const execApprovalsConfig =
+          ((discordCfg as Record<string, unknown>).execApprovals as
+            | Record<string, unknown>
+            | undefined) ?? {};
+        const gatewayAuth = (api.config as Record<string, Record<string, unknown>>).gateway?.auth as
+          | string
+          | undefined;
+
+        if (discordAccount && (execApprovalsConfig as Record<string, unknown>).enabled) {
+          researcherQuestionsHandler = new DiscordResearcherQuestionsHandler({
+            token: (discordAccount as Record<string, string>).token,
+            accountId: discordAccountId,
+            config: {
+              enabled: true,
+              approvers: (execApprovalsConfig as Record<string, unknown>).approvers as
+                | Array<string | number>
+                | undefined,
+            },
+            gatewayToken: gatewayAuth,
+            cfg: api.config,
+          });
+
+          registerDiscordComponentFactory(() =>
+            createResearcherQuestionButton({ handler: researcherQuestionsHandler! }),
+          );
+        }
+      }
+    } catch (err) {
+      logger.error(`Failed to initialize researcher questions handler: ${err}`);
+    }
+
+    // -------------------------------------------------------------------
     // 1. Register service
     // -------------------------------------------------------------------
     api.registerService({
@@ -182,6 +243,11 @@ const researcherPlugin = {
             notifyFn,
           });
           await service.start(ctx as Parameters<typeof service.start>[0]);
+
+          // Start Discord researcher questions handler (interview buttons)
+          if (researcherQuestionsHandler) {
+            await researcherQuestionsHandler.start();
+          }
         } catch (err) {
           logger.error(`Researcher service failed to start: ${err}`);
         }
@@ -200,6 +266,11 @@ const researcherPlugin = {
             notifyFn,
           });
           await service.stop?.(ctx as Parameters<typeof service.start>[0]);
+
+          // Stop Discord researcher questions handler
+          if (researcherQuestionsHandler) {
+            await researcherQuestionsHandler.stop();
+          }
         } catch (err) {
           logger.error(`Researcher service failed to stop: ${err}`);
         }

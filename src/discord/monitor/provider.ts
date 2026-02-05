@@ -26,6 +26,7 @@ import { fetchDiscordApplicationId } from "../probe.js";
 import { resolveDiscordChannelAllowlist } from "../resolve-channels.js";
 import { resolveDiscordUserAllowlist } from "../resolve-users.js";
 import { normalizeDiscordToken } from "../token.js";
+import { drainDiscordComponentFactories } from "./component-registry.js";
 import { createExecApprovalButton, DiscordExecApprovalHandler } from "./exec-approvals.js";
 import { registerGateway, unregisterGateway } from "./gateway-registry.js";
 import {
@@ -40,11 +41,6 @@ import {
   createDiscordCommandArgFallbackButton,
   createDiscordNativeCommand,
 } from "./native-command.js";
-import {
-  createResearcherQuestionButton,
-  DiscordResearcherQuestionsHandler,
-} from "./researcher-questions.js";
-import { createScoutProposalButton } from "./scout-proposals.js";
 
 export type MonitorDiscordOpts = {
   token?: string;
@@ -492,22 +488,6 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
       })
     : null;
 
-  // Initialize researcher questions handler if exec approvals is enabled (reuses same approvers)
-  // This handler shows interview questions as Discord buttons
-  const researcherQuestionsConfig = {
-    enabled: execApprovalsConfig.enabled ?? false,
-    approvers: execApprovalsConfig.approvers,
-  };
-  const researcherQuestionsHandler = researcherQuestionsConfig.enabled
-    ? new DiscordResearcherQuestionsHandler({
-        token,
-        accountId: account.accountId,
-        config: researcherQuestionsConfig,
-        gatewayToken: gatewayAuthToken,
-        cfg,
-      })
-    : null;
-
   const components = [
     createDiscordCommandArgFallbackButton({
       cfg,
@@ -521,12 +501,8 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     components.push(createExecApprovalButton({ handler: execApprovalsHandler }));
   }
 
-  if (researcherQuestionsHandler) {
-    components.push(createResearcherQuestionButton({ handler: researcherQuestionsHandler }));
-  }
-
-  // Scout proposal buttons (purely reactive — no gateway connection needed)
-  components.push(createScoutProposalButton());
+  // Drain extension-registered Discord components (scout proposals, researcher questions, etc.)
+  components.push(...drainDiscordComponentFactories());
 
   const client = new Client(
     {
@@ -632,11 +608,6 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     await execApprovalsHandler.start();
   }
 
-  // Start researcher questions handler
-  if (researcherQuestionsHandler) {
-    await researcherQuestionsHandler.start();
-  }
-
   const gateway = client.getPlugin<GatewayPlugin>("gateway");
   if (gateway) {
     registerGateway(account.accountId, gateway);
@@ -716,9 +687,6 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     abortSignal?.removeEventListener("abort", onAbort);
     if (execApprovalsHandler) {
       await execApprovalsHandler.stop();
-    }
-    if (researcherQuestionsHandler) {
-      await researcherQuestionsHandler.stop();
     }
   }
 }

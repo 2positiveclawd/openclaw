@@ -10,15 +10,12 @@
 // with scripts/scout-notify.ts which sends the initial messages.
 
 import { Button, type ButtonInteraction, type ComponentData } from "@buape/carbon";
-import { ButtonStyle, Routes } from "discord-api-types/v10";
+import { ButtonStyle } from "discord-api-types/v10";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { OpenClawConfig } from "../../config/config.js";
-import { loadConfig } from "../../config/config.js";
-import { logDebug, logError } from "../../logger.js";
-import { createDiscordClient } from "../send.shared.js";
+import { logDebug, logError } from "openclaw/plugin-sdk";
 
 // ---------------------------------------------------------------------------
 // Constants

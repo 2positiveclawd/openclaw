@@ -398,3 +398,19 @@ export {
 export { loadProviderUsageSummary } from "../infra/provider-usage.load.js";
 export { deliverOutboundPayloads, type OutboundDeliveryResult } from "../infra/outbound/deliver.js";
 export { createDefaultDeps, type CliDeps } from "../cli/deps.js";
+
+// Discord component registration (for extensions with button handlers)
+export { registerDiscordComponentFactory } from "../discord/monitor/component-registry.js";
+
+// Gateway client (for extensions needing WebSocket to gateway)
+export { GatewayClient } from "../gateway/client.js";
+export { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
+
+// Discord REST helpers
+export { createDiscordClient } from "../discord/send.shared.js";
+
+// Logging (for extensions that need debug/error logging)
+export { logDebug, logError } from "../logger.js";
+
+// Gateway protocol types
+export type { EventFrame } from "../gateway/protocol/index.js";
