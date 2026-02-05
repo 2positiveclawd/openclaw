@@ -94,6 +94,26 @@ systemctl --user restart openclaw-gateway
 
 See `docs/fork/AGENTS-GUIDE.md` for complete instructions.
 
+## Scout-Spec-Ship (System Improvement Playbook)
+
+**Full documentation:** See `docs/fork/SCOUT-SPEC-SHIP.md`
+
+When discovering improvement opportunities during normal work, follow the **Scout-Spec-Ship (SSS)** pattern:
+
+1. **SCOUT** — Identify the problem and brainstorm solutions (5-10 min)
+2. **ASSESS** — Validate feasibility by reading source code, checking existing solutions (15-30 min)
+3. **SPEC** — Write a concrete plan with files to change, test plan, rollback plan
+4. **BUILD** — Implement incrementally, testing each piece as you go
+5. **VERIFY** — Run E2E tests proving the whole flow works
+6. **SHIP** — Commit, push, document, restart, verify in production
+
+**Key rules:**
+
+- Gate each phase: kill bad ideas early (SCOUT/ASSESS) before investing build time
+- Memory-first: check `memory_search` before `web_search` (shared knowledge at `memory/knowledge/`)
+- File scout notes at `memory/knowledge/research/YYYY-MM-DD-scout-{topic}.md` for nightly review
+- Proposals awaiting approval go to `memory/scout-proposals/`
+
 ## Runtime: Systemd (Active)
 
 ```

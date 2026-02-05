@@ -672,4 +672,5 @@ Each pack has its own Discord category with channels for each agent:
 
 - [Dashboard Guide](./DASHBOARD.md) - Monitoring agents in the dashboard
 - [Local Patches](./LOCAL-PATCHES.md) - Extension maintenance
+- [Scout-Spec-Ship Playbook](./SCOUT-SPEC-SHIP.md) - System improvement pattern (discover → validate → build → test → ship)
 - [AGENTS.md](../../AGENTS.md) - Deployment overview
