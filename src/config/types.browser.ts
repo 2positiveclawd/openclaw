@@ -38,4 +38,8 @@ export type BrowserConfig = {
   profiles?: Record<string, BrowserProfileConfig>;
   /** Default snapshot options (applied by the browser tool/CLI when unset). */
   snapshotDefaults?: BrowserSnapshotDefaults;
+  /** Enable anti-detection stealth mode (fingerprint injection + evasions). Default: false */
+  stealth?: boolean;
+  /** Proxy server URL (e.g., socks5://host:port). Default: none */
+  proxy?: string;
 };

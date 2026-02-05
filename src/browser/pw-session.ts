@@ -10,6 +10,7 @@ import { chromium } from "playwright-core";
 import { formatErrorMessage } from "../infra/errors.js";
 import { getHeadersWithAuth } from "./cdp.helpers.js";
 import { getChromeWebSocketUrl } from "./chrome.js";
+import { applyStealthToContext, isStealthEnabled } from "./stealth.js";
 
 export type BrowserConsoleMessage = {
   type: string;
@@ -292,6 +293,10 @@ function observeContext(context: BrowserContext) {
   }
   observedContexts.add(context);
   ensureContextState(context);
+
+  if (isStealthEnabled()) {
+    applyStealthToContext(context).catch(() => {});
+  }
 
   for (const page of context.pages()) {
     ensurePageState(page);

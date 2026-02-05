@@ -49,6 +49,38 @@ export { createDefaultDeps, type CliDeps } from "../cli/deps.js";
 
 ---
 
+### 3. Browser Stealth Mode
+
+Anti-bot detection bypass using Apify's fingerprint-suite. Injects realistic browser fingerprints and patches detection vectors (navigator.webdriver, chrome.runtime, plugins, codecs, etc.).
+
+**New file (no conflict risk):**
+
+- `src/browser/stealth.ts` — All stealth logic: `getStealthLaunchArgs()`, `applyStealthToContext()`, `isStealthEnabled()`
+
+**Patched files:**
+
+| File                          | Change                                                                  | Lines |
+| ----------------------------- | ----------------------------------------------------------------------- | ----- |
+| `src/config/types.browser.ts` | Add `stealth?: boolean` and `proxy?: string` to `BrowserConfig`         | +4    |
+| `src/config/zod-schema.ts`    | Add `stealth` and `proxy` to browser config zod schema                  | +2    |
+| `src/browser/config.ts`       | Add `stealth` and `proxy` to `ResolvedBrowserConfig` type + resolution  | +6    |
+| `src/browser/chrome.ts`       | Import `getStealthLaunchArgs`, add stealth/proxy flags in `spawnOnce()` | +8    |
+| `src/browser/pw-session.ts`   | Import + call `applyStealthToContext()` in `observeContext()`           | +5    |
+
+**Dependencies added to `package.json`:**
+
+- `fingerprint-generator` — Generates realistic browser fingerprints
+- `fingerprint-injector` — Injects fingerprints into Playwright contexts
+- `user-agents` — User-agent string database
+
+**Config:** Enable with `browser.stealth: true` in `~/.openclaw/openclaw.json`.
+
+**Conflict likelihood:** LOW — small additive patches to 4 core files. If upstream restructures browser launch or config types, reapply the patches.
+
+**Resolution:** Re-add stealth fields to types/config, re-add flag injection in `chrome.ts`, re-add context injection in `pw-session.ts`. The `stealth.ts` module is self-contained and only needs its imports to resolve.
+
+---
+
 ## Why This Approach
 
 ### The Problem

@@ -22,6 +22,7 @@ import {
   DEFAULT_OPENCLAW_BROWSER_COLOR,
   DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME,
 } from "./constants.js";
+import { getStealthLaunchArgs } from "./stealth.js";
 
 const log = createSubsystemLogger("browser").child("chrome");
 
@@ -212,6 +213,12 @@ export async function launchOpenClawChrome(
     }
     if (process.platform === "linux") {
       args.push("--disable-dev-shm-usage");
+    }
+    if (resolved.stealth) {
+      args.push(...getStealthLaunchArgs({ headless: resolved.headless }));
+    }
+    if (resolved.proxy) {
+      args.push(`--proxy-server=${resolved.proxy}`);
     }
 
     // Always open a blank tab to ensure a target exists.
