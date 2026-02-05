@@ -379,6 +379,111 @@ The scout proposes; the daily job executes. Both follow the SSS phases but the s
 
 ---
 
+## Vision Scout (Proactive Extension Scout)
+
+While the **Nightly Scout** looks **backwards** at problems (errors, friction, waste), the **Vision Scout** looks **forward** at opportunities — new capabilities that advance the operator's goals.
+
+### Philosophy
+
+The Vision Scout asks: _"What should we be able to do that we can't do today?"_
+
+Examples of Vision Scout proposals:
+
+- "Agents can't browse anti-bot sites" → Stealth browser integration
+- "No way to track spending across providers" → Cost dashboard
+- "Agents can't collaborate on complex tasks" → Multi-agent workflows
+- "No proactive monitoring of user interests" → Trend scout packs
+
+### How It Differs from Nightly Scout
+
+| Aspect            | Nightly Scout                       | Vision Scout                                          |
+| ----------------- | ----------------------------------- | ----------------------------------------------------- |
+| **Focus**         | Fix what's broken                   | Build what's missing                                  |
+| **Sources**       | Error logs, session friction, waste | Operator goals, capability gaps, ecosystem tools      |
+| **Trigger**       | System signals (errors, noise)      | Strategic alignment (goals, vision)                   |
+| **Risk profile**  | Usually LOW-MED (fixing existing)   | Usually MED-HIGH (adding new capability)              |
+| **Allowed tools** | No web_search                       | web_search allowed (1-2 calls for ecosystem research) |
+
+### Input: Operator Goals
+
+The Vision Scout needs to know what the operator wants to achieve. Goals are stored at:
+
+**`memory/operator-goals.md`**
+
+```markdown
+# Operator Goals
+
+## Primary Goals
+
+1. {Goal 1 — what the operator wants to achieve}
+2. {Goal 2}
+
+## Current Capabilities
+
+- {What the system can already do toward these goals}
+
+## Known Gaps
+
+- {What's missing — things agents can't do yet}
+
+## Interests & Domains
+
+- {Topics the operator cares about — travel, finance, health, etc.}
+```
+
+The Vision Scout reads this file at the start of every run. If the file doesn't exist or is stale, the scout should note this and skip vision proposals.
+
+### Implementation
+
+**Schedule:** Weekly (Sundays at 03:00 UTC) — less frequent because proactive ideas need more thought and research.
+
+**Discord channel:** Same `#nightly-scout` channel (category: Improvements), but tagged differently.
+
+**Cron job:**
+
+```bash
+openclaw cron add \
+  --name "vision-scout" \
+  --cron "0 3 * * 0" \
+  --tz "UTC" \
+  --agent main \
+  --session isolated \
+  --announce \
+  --to "NIGHTLY_SCOUT_CHANNEL_ID" \
+  --message "You are running the Vision Scout (proactive extension scan)..."
+```
+
+### Vision Proposal Format
+
+```markdown
+## Vision Proposal {N}: {Title}
+
+**Goal alignment:** {Which operator goal this serves}
+**Capability gap:** {What agents can't do today}
+**Proposed capability:** {What they'd be able to do after}
+
+**Assessment:**
+
+- Feasibility: {YES / MAYBE / NO}
+- Effort: {LOW / MEDIUM / HIGH}
+- Impact: {LOW / MEDIUM / HIGH}
+- Risk: {LOW / MEDIUM / HIGH}
+- Ecosystem tools: {libraries, APIs, or services that enable this}
+- Files to change: {count} ({key files})
+
+**Verdict:** {GO / NO-GO / NEEDS-INFO}
+```
+
+### Three-Scout Ecosystem
+
+| Scout                    | Schedule             | Focus                         | Channel        |
+| ------------------------ | -------------------- | ----------------------------- | -------------- |
+| `nightly-scout`          | Daily 02:00 UTC      | Fix problems, reduce waste    | #nightly-scout |
+| `vision-scout`           | Weekly Sun 03:00 UTC | New capabilities toward goals | #nightly-scout |
+| `daily-self-improvement` | Daily 19:00 Warsaw   | Execute approved proposals    | (internal)     |
+
+---
+
 ## Checklists
 
 ### Quick Reference: Phase Gates

@@ -44,6 +44,7 @@ import {
   createResearcherQuestionButton,
   DiscordResearcherQuestionsHandler,
 } from "./researcher-questions.js";
+import { createScoutProposalButton } from "./scout-proposals.js";
 
 export type MonitorDiscordOpts = {
   token?: string;
@@ -523,6 +524,9 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
   if (researcherQuestionsHandler) {
     components.push(createResearcherQuestionButton({ handler: researcherQuestionsHandler }));
   }
+
+  // Scout proposal buttons (purely reactive — no gateway connection needed)
+  components.push(createScoutProposalButton());
 
   const client = new Client(
     {
