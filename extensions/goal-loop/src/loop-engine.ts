@@ -7,9 +7,9 @@
 
 import type { CoreCliDeps, CoreConfig, CoreCronJob, CoreDeps } from "./core-bridge.js";
 import type { GoalLoopPluginConfig, GoalNotifyConfig, GoalState } from "./types.js";
-import { readGoal, writeGoal, appendIterationLog } from "./state.js";
-import { runGovernanceChecks, shouldTriggerQualityGate } from "./governance.js";
 import { runProgressEvaluation } from "./evaluator.js";
+import { runGovernanceChecks, shouldTriggerQualityGate } from "./governance.js";
+import { readGoal, writeGoal, appendIterationLog } from "./state.js";
 
 // ---------------------------------------------------------------------------
 // Automation (webhooks, chains) - optional, fails silently if not available
@@ -34,7 +34,9 @@ async function loadAutomation() {
 }
 
 async function fireAutomationEvent(
-  eventFn: (mod: typeof import("../../automation/dist/index.js")) => import("../../automation/dist/index.js").AutomationEvent
+  eventFn: (
+    mod: typeof import("../../automation/dist/index.js"),
+  ) => import("../../automation/dist/index.js").AutomationEvent,
 ) {
   try {
     const mod = await loadAutomation();
@@ -159,7 +161,9 @@ ${criteriaList}`;
   if (goal.usage.iterations === 0) {
     const learningContext = await getLearningContext(goal.goal);
     if (learningContext) {
-      console.log(`[goal-loop] Injecting learning context for goal ${goal.id} (found similar past goals)`);
+      console.log(
+        `[goal-loop] Injecting learning context for goal ${goal.id} (found similar past goals)`,
+      );
       prompt += `\n\n${learningContext}`;
     }
   }
@@ -252,7 +256,9 @@ export async function runGoalLoop(params: {
         ).catch(() => {});
       }
       // Fire automation event: goal.failed
-      await fireAutomationEvent((mod) => mod.events.goalFailed(goal.id, goal.goal, goal.stopReason));
+      await fireAutomationEvent((mod) =>
+        mod.events.goalFailed(goal.id, goal.goal, goal.stopReason),
+      );
       // Record learning for future goals
       await recordGoalLearning(goal, "failed");
     }
@@ -299,10 +305,9 @@ async function loopBody(
       writeGoal(goal);
       ctx.logger.info(`Goal ${goal.id} stopped: ${goal.stopReason}`);
       if (goal.notify) {
-        await ctx.notifyFn(
-          goal.notify,
-          `Goal stopped: ${goal.goal} [${goal.id}] — ${goal.stopReason}`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(goal.notify, `Goal stopped: ${goal.goal} [${goal.id}] — ${goal.stopReason}`)
+          .catch(() => {});
       }
       return;
     }
@@ -324,19 +329,19 @@ async function loopBody(
         `Goal ${goal.id} paused for quality gate at iteration ${goal.usage.iterations + 1}`,
       );
       if (goal.notify) {
-        await ctx.notifyFn(
-          goal.notify,
-          `Approval needed for goal [${goal.id}] at iteration ${goal.usage.iterations + 1}. Reply: /goal-approve ${goal.id} or /goal-reject ${goal.id}`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(
+            goal.notify,
+            `Approval needed for goal [${goal.id}] at iteration ${goal.usage.iterations + 1}. Reply: /goal-approve ${goal.id} or /goal-reject ${goal.id}`,
+          )
+          .catch(() => {});
       }
       const approvalResult = await ctx.waitForApproval(goal.id);
       goal = readGoal(goal.id) ?? goal;
       if (approvalResult === "rejected" || approvalResult === "timeout") {
         if (goal.status === "paused") {
           const action =
-            approvalResult === "timeout"
-              ? ctx.pluginConfig.approvalTimeoutAction
-              : "auto-reject";
+            approvalResult === "timeout" ? ctx.pluginConfig.approvalTimeoutAction : "auto-reject";
           if (action === "auto-reject") {
             goal.status = "stopped";
             goal.stopReason =
@@ -347,10 +352,12 @@ async function loopBody(
             writeGoal(goal);
             ctx.logger.info(`Goal ${goal.id} stopped: ${goal.stopReason}`);
             if (goal.notify) {
-              await ctx.notifyFn(
-                goal.notify,
-                `Goal stopped: ${goal.goal} [${goal.id}] — ${goal.stopReason}`,
-              ).catch(() => {});
+              await ctx
+                .notifyFn(
+                  goal.notify,
+                  `Goal stopped: ${goal.goal} [${goal.id}] — ${goal.stopReason}`,
+                )
+                .catch(() => {});
             }
             return;
           }
@@ -395,6 +402,7 @@ async function loopBody(
       summary?: string;
       outputText?: string;
       error?: string;
+      tokenUsage?: { input: number; output: number; total: number };
     };
     try {
       turnResult = await ctx.coreDeps.runCronIsolatedAgentTurn({
@@ -410,6 +418,11 @@ async function loopBody(
     }
     const iterationDuration = Date.now() - iterationStart;
 
+    // Accumulate token usage from this iteration
+    if (turnResult.tokenUsage) {
+      goal.usage.totalTokens += turnResult.tokenUsage.total;
+    }
+
     // -----------------------------------------------------------------------
     // 5. Record results
     // -----------------------------------------------------------------------
@@ -423,6 +436,7 @@ async function loopBody(
       outputText: turnResult.outputText,
       error: turnResult.error,
       durationMs: iterationDuration,
+      tokenUsage: turnResult.tokenUsage,
     });
 
     goal.usage.iterations = iterNum;
@@ -467,15 +481,17 @@ async function loopBody(
         writeGoal(goal);
         ctx.logger.info(`Goal ${goal.id} completed: ${evalResult.assessment}`);
         if (goal.notify) {
-          await ctx.notifyFn(
-            goal.notify,
-            `Goal COMPLETED: ${goal.goal} [${goal.id}] — Score: ${evalResult.progressScore}/100`,
-          ).catch(() => {});
+          await ctx
+            .notifyFn(
+              goal.notify,
+              `Goal COMPLETED: ${goal.goal} [${goal.id}] — Score: ${evalResult.progressScore}/100`,
+            )
+            .catch(() => {});
         }
         // Fire automation event: goal.completed
         const duration = Date.now() - (goal.usage.startedAtMs || Date.now());
         await fireAutomationEvent((mod) =>
-          mod.events.goalCompleted(goal.id, goal.goal, evalResult.progressScore, duration)
+          mod.events.goalCompleted(goal.id, goal.goal, evalResult.progressScore, duration),
         );
         // Record learning for future goals
         await recordGoalLearning(goal, "completed");
@@ -487,14 +503,16 @@ async function loopBody(
         writeGoal(goal);
         ctx.logger.info(`Goal ${goal.id} stopped by evaluator: ${evalResult.assessment}`);
         if (goal.notify) {
-          await ctx.notifyFn(
-            goal.notify,
-            `Goal stopped by evaluator: ${goal.goal} [${goal.id}] — ${evalResult.assessment}`,
-          ).catch(() => {});
+          await ctx
+            .notifyFn(
+              goal.notify,
+              `Goal stopped by evaluator: ${goal.goal} [${goal.id}] — ${evalResult.assessment}`,
+            )
+            .catch(() => {});
         }
         // Fire automation event: goal.failed (stopped by evaluator)
         await fireAutomationEvent((mod) =>
-          mod.events.goalFailed(goal.id, goal.goal, evalResult.assessment)
+          mod.events.goalFailed(goal.id, goal.goal, evalResult.assessment),
         );
         // Record learning for future goals
         await recordGoalLearning(goal, "failed");
@@ -513,26 +531,25 @@ async function loopBody(
         writeGoal(goal);
         ctx.logger.info(`Goal ${goal.id} stopped: ${goal.stopReason}`);
         if (goal.notify) {
-          await ctx.notifyFn(
-            goal.notify,
-            `Goal stopped: ${goal.goal} [${goal.id}] — ${goal.stopReason}`,
-          ).catch(() => {});
+          await ctx
+            .notifyFn(goal.notify, `Goal stopped: ${goal.goal} [${goal.id}] — ${goal.stopReason}`)
+            .catch(() => {});
         }
         // Fire automation event: goal.stalled
         const lastScore = goal.evaluationScores[goal.evaluationScores.length - 1] ?? 0;
-        await fireAutomationEvent((mod) =>
-          mod.events.goalStalled(goal.id, goal.goal, lastScore)
-        );
+        await fireAutomationEvent((mod) => mod.events.goalStalled(goal.id, goal.goal, lastScore));
         // Record learning for future goals
         await recordGoalLearning(goal, "stalled");
         return;
       }
 
       if (goal.notify) {
-        await ctx.notifyFn(
-          goal.notify,
-          `Goal checkpoint [${goal.id}] — Iteration ${iterNum}, Score: ${evalResult.progressScore}/100. ${evalResult.assessment}`,
-        ).catch(() => {});
+        await ctx
+          .notifyFn(
+            goal.notify,
+            `Goal checkpoint [${goal.id}] — Iteration ${iterNum}, Score: ${evalResult.progressScore}/100. ${evalResult.assessment}`,
+          )
+          .catch(() => {});
       }
     } else {
       goal.status = "running";

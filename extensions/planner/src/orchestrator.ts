@@ -177,13 +177,17 @@ async function orchestratorBody(
     plan.usage.agentTurns++;
     writePlan(plan);
 
-    const planResult = await runPlannerAgent({
+    const plannerResult = await runPlannerAgent({
       plan,
       coreDeps: ctx.coreDeps,
       cfg: ctx.cfg,
       cliDeps: ctx.cliDeps,
       logger: ctx.logger,
     });
+    if (plannerResult.tokenUsage) {
+      plan.usage.totalTokens += plannerResult.tokenUsage.total;
+    }
+    const planResult = plannerResult.parsed;
 
     if (!planResult || planResult.tasks.length === 0) {
       plan.status = "failed";
@@ -368,6 +372,9 @@ async function orchestratorBody(
       if (!task) continue;
 
       plan.usage.agentTurns++;
+      if (result.tokenUsage) {
+        plan.usage.totalTokens += result.tokenUsage.total;
+      }
 
       if (result.status === "ok") {
         task.result = result;
@@ -457,6 +464,9 @@ async function orchestratorBody(
     cliDeps: ctx.cliDeps,
     logger: ctx.logger,
   });
+  if (evalResult.tokenUsage) {
+    plan.usage.totalTokens += evalResult.tokenUsage.total;
+  }
 
   plan = readPlan(plan.id) ?? plan;
   plan.finalEvaluation = evalResult;
@@ -524,7 +534,7 @@ async function handleReplan(
       .catch(() => {});
   }
 
-  const replanResult = await runPlannerAgent({
+  const replanAgentResult = await runPlannerAgent({
     plan,
     coreDeps: ctx.coreDeps,
     cfg: ctx.cfg,
@@ -532,6 +542,10 @@ async function handleReplan(
     logger: ctx.logger,
     replan: true,
   });
+  if (replanAgentResult.tokenUsage) {
+    plan.usage.totalTokens += replanAgentResult.tokenUsage.total;
+  }
+  const replanResult = replanAgentResult.parsed;
 
   if (!replanResult || replanResult.tasks.length === 0) {
     ctx.logger.warn(`Plan ${plan.id}: replanner produced no tasks`);

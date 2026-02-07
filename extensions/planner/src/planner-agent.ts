@@ -168,6 +168,11 @@ export function parsePlannerResponse(text: string): ParsedPlannerResponse | null
 // Run planner agent turn
 // ---------------------------------------------------------------------------
 
+export type PlannerAgentResult = {
+  parsed: ParsedPlannerResponse | null;
+  tokenUsage?: { input: number; output: number; total: number };
+};
+
 export async function runPlannerAgent(params: {
   plan: PlanState;
   coreDeps: CoreDeps;
@@ -175,7 +180,7 @@ export async function runPlannerAgent(params: {
   cliDeps: CoreCliDeps;
   logger: Logger;
   replan?: boolean;
-}): Promise<ParsedPlannerResponse | null> {
+}): Promise<PlannerAgentResult> {
   const { plan, coreDeps, cfg, cliDeps, logger, replan } = params;
   const startMs = Date.now();
 
@@ -196,6 +201,7 @@ export async function runPlannerAgent(params: {
 
   const sessionKey = `planner:${plan.id}`;
   let resultText = "";
+  let tokenUsage: { input: number; output: number; total: number } | undefined;
 
   try {
     const result = await coreDeps.runCronIsolatedAgentTurn({
@@ -207,6 +213,7 @@ export async function runPlannerAgent(params: {
       agentId: "planner",
     });
 
+    tokenUsage = result.tokenUsage;
     if (result.status === "error") {
       logger.warn(`Planner agent returned error for plan ${plan.id}: ${result.error}`);
       resultText = result.error ?? "";
@@ -235,5 +242,5 @@ export async function runPlannerAgent(params: {
     );
   }
 
-  return parsed;
+  return { parsed, tokenUsage };
 }

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import type { NormalizedUsage, UsageLike } from "../agents/usage.js";
@@ -254,6 +255,139 @@ export async function loadCostUsageSummary(params?: {
     daily,
     totals,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Source attribution: parse session keys to determine what generated the usage
+// ---------------------------------------------------------------------------
+
+export type SourceUsageEntry = {
+  sourceType: "cron" | "goal" | "planner" | "discord" | "manual" | "other";
+  sourceId: string;
+  sourceName: string;
+  agentId: string;
+  tokens: number;
+  cost: number;
+  sessionCount: number;
+  lastActivity?: number;
+};
+
+export type SourceUsageSummary = {
+  updatedAt: number;
+  sources: SourceUsageEntry[];
+};
+
+function parseSessionSource(sessionKey: string): {
+  sourceType: SourceUsageEntry["sourceType"];
+  sourceId: string;
+} {
+  // Strip the "agent:{agentId}:" prefix if present
+  const stripped = sessionKey.replace(/^agent:[^:]+:/, "");
+
+  if (stripped.startsWith("cron:")) {
+    return { sourceType: "cron", sourceId: stripped.slice(5) };
+  }
+  if (stripped.startsWith("goal:")) {
+    return { sourceType: "goal", sourceId: stripped.split(":")[1] ?? stripped };
+  }
+  if (
+    stripped.startsWith("planner-worker:") ||
+    stripped.startsWith("planner:") ||
+    stripped.startsWith("planner-eval:")
+  ) {
+    const parts = stripped.split(":");
+    return { sourceType: "planner", sourceId: parts[1] ?? stripped };
+  }
+  if (stripped.startsWith("discord:")) {
+    return { sourceType: "discord", sourceId: stripped };
+  }
+  if (stripped === "main") {
+    return { sourceType: "manual", sourceId: "main" };
+  }
+  return { sourceType: "other", sourceId: stripped };
+}
+
+export async function loadCostUsageBySource(params?: {
+  config?: OpenClawConfig;
+  cronJobNames?: Record<string, string>;
+}): Promise<SourceUsageSummary> {
+  const agentsDir = path.join(
+    process.env.OPENCLAW_HOME ?? path.join(os.homedir(), ".openclaw"),
+    "agents",
+  );
+
+  const sourceMap = new Map<string, SourceUsageEntry>();
+
+  let agentDirs: string[];
+  try {
+    agentDirs = (await fs.promises.readdir(agentsDir, { withFileTypes: true }))
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return { updatedAt: Date.now(), sources: [] };
+  }
+
+  for (const agentId of agentDirs) {
+    const sessionsFile = path.join(agentsDir, agentId, "sessions/sessions.json");
+    let store: Record<string, Record<string, unknown>>;
+    try {
+      const raw = await fs.promises.readFile(sessionsFile, "utf-8");
+      store = JSON.parse(raw);
+    } catch {
+      continue;
+    }
+
+    for (const [sessionKey, entry] of Object.entries(store)) {
+      const totalTokens = typeof entry.totalTokens === "number" ? entry.totalTokens : 0;
+      const inputTokens = typeof entry.inputTokens === "number" ? entry.inputTokens : 0;
+      const outputTokens = typeof entry.outputTokens === "number" ? entry.outputTokens : 0;
+
+      if (totalTokens === 0 && inputTokens === 0 && outputTokens === 0) continue;
+
+      const { sourceType, sourceId } = parseSessionSource(sessionKey);
+      const mapKey = `${sourceType}:${sourceId}`;
+
+      const existing = sourceMap.get(mapKey);
+      const tokens = totalTokens || inputTokens + outputTokens;
+      const updatedAt = typeof entry.updatedAt === "number" ? entry.updatedAt : undefined;
+
+      if (existing) {
+        existing.tokens += tokens;
+        existing.sessionCount++;
+        if (updatedAt && (!existing.lastActivity || updatedAt > existing.lastActivity)) {
+          existing.lastActivity = updatedAt;
+        }
+      } else {
+        // Resolve display name
+        let sourceName = sourceId;
+        if (sourceType === "cron" && params?.cronJobNames?.[sourceId]) {
+          sourceName = params.cronJobNames[sourceId];
+        } else if (sourceType === "goal") {
+          sourceName = `Goal ${sourceId.slice(0, 8)}`;
+        } else if (sourceType === "planner") {
+          sourceName = `Plan ${sourceId.slice(0, 8)}`;
+        } else if (sourceType === "discord") {
+          sourceName = "Discord";
+        } else if (sourceType === "manual") {
+          sourceName = "Manual session";
+        }
+
+        sourceMap.set(mapKey, {
+          sourceType,
+          sourceId,
+          sourceName,
+          agentId,
+          tokens,
+          cost: 0,
+          sessionCount: 1,
+          lastActivity: updatedAt,
+        });
+      }
+    }
+  }
+
+  const sources = Array.from(sourceMap.values()).sort((a, b) => b.tokens - a.tokens);
+  return { updatedAt: Date.now(), sources };
 }
 
 export async function loadSessionCostSummary(params: {

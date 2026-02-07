@@ -122,6 +122,7 @@ export async function runWorkerAgent(params: {
       status: "ok",
       summary,
       outputText: result.outputText,
+      tokenUsage: result.tokenUsage,
     };
   } catch (err) {
     const durationMs = Date.now() - startMs;

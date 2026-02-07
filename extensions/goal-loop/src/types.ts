@@ -108,6 +108,7 @@ export type GoalIterationRecord = {
   outputText?: string;
   error?: string;
   durationMs: number;
+  tokenUsage?: { input: number; output: number; total: number };
 };
 
 /** Record appended to the per-goal evaluations JSONL log. */

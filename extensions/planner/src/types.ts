@@ -3,22 +3,10 @@
 // ---------------------------------------------------------------------------
 
 /** Possible states for a plan. */
-export type PlanStatus =
-  | "pending"
-  | "planning"
-  | "running"
-  | "completed"
-  | "failed"
-  | "stopped";
+export type PlanStatus = "pending" | "planning" | "running" | "completed" | "failed" | "stopped";
 
 /** Possible states for a task within a plan. */
-export type TaskStatus =
-  | "pending"
-  | "ready"
-  | "running"
-  | "completed"
-  | "failed"
-  | "skipped";
+export type TaskStatus = "pending" | "ready" | "running" | "completed" | "failed" | "skipped";
 
 /** Result of a single task execution. */
 export type TaskResult = {
@@ -26,6 +14,7 @@ export type TaskResult = {
   summary?: string;
   outputText?: string;
   error?: string;
+  tokenUsage?: { input: number; output: number; total: number };
 };
 
 /** A single unit of work in the DAG. */
@@ -83,12 +72,7 @@ export type EvaluationResult = {
 };
 
 /** Current phase of orchestration. */
-export type PlanPhase =
-  | "planning"
-  | "executing"
-  | "replanning"
-  | "evaluating"
-  | "done";
+export type PlanPhase = "planning" | "executing" | "replanning" | "evaluating" | "done";
 
 /** Full state of a plan. */
 export type PlanState = {

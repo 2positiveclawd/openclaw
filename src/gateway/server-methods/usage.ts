@@ -1,8 +1,9 @@
-import type { CostUsageSummary } from "../../infra/session-cost-usage.js";
+import type { CostUsageSummary, SourceUsageSummary } from "../../infra/session-cost-usage.js";
 import type { GatewayRequestHandlers } from "./types.js";
 import { loadConfig } from "../../config/config.js";
+import { DEFAULT_CRON_STORE_PATH, loadCronStore } from "../../cron/store.js";
 import { loadProviderUsageSummary } from "../../infra/provider-usage.js";
-import { loadCostUsageSummary } from "../../infra/session-cost-usage.js";
+import { loadCostUsageSummary, loadCostUsageBySource } from "../../infra/session-cost-usage.js";
 
 const COST_USAGE_CACHE_TTL_MS = 30_000;
 
@@ -74,6 +75,8 @@ async function loadCostUsageSummaryCached(params: {
   return await inFlight;
 }
 
+let sourceUsageCache: { summary?: SourceUsageSummary; updatedAt?: number } = {};
+
 export const usageHandlers: GatewayRequestHandlers = {
   "usage.status": async ({ respond }) => {
     const summary = await loadProviderUsageSummary();
@@ -83,6 +86,33 @@ export const usageHandlers: GatewayRequestHandlers = {
     const config = loadConfig();
     const days = parseDays(params?.days);
     const summary = await loadCostUsageSummaryCached({ days, config });
+    respond(true, summary, undefined);
+  },
+  "usage.by-source": async ({ respond }) => {
+    const now = Date.now();
+    if (
+      sourceUsageCache.summary &&
+      sourceUsageCache.updatedAt &&
+      now - sourceUsageCache.updatedAt < COST_USAGE_CACHE_TTL_MS
+    ) {
+      respond(true, sourceUsageCache.summary, undefined);
+      return;
+    }
+    const config = loadConfig();
+    // Load cron job names for display
+    const cronJobNames: Record<string, string> = {};
+    try {
+      const store = await loadCronStore(DEFAULT_CRON_STORE_PATH);
+      for (const job of store.jobs) {
+        if (job.name) {
+          cronJobNames[job.id] = job.name;
+        }
+      }
+    } catch {
+      // No cron jobs available
+    }
+    const summary = await loadCostUsageBySource({ config, cronJobNames });
+    sourceUsageCache = { summary, updatedAt: Date.now() };
     respond(true, summary, undefined);
   },
 };

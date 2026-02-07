@@ -12,6 +12,7 @@ import {
   markAuthProfileGood,
   markAuthProfileUsed,
 } from "../auth-profiles.js";
+import { estimateMessagesTokens } from "../compaction.js";
 import {
   CONTEXT_WINDOW_HARD_MIN_TOKENS,
   CONTEXT_WINDOW_WARN_BELOW_TOKENS,
@@ -43,7 +44,7 @@ import {
   pickFallbackThinkingLevel,
   type FailoverReason,
 } from "../pi-embedded-helpers.js";
-import { normalizeUsage, type UsageLike } from "../usage.js";
+import { hasNonzeroUsage, normalizeUsage, type UsageLike } from "../usage.js";
 import { compactEmbeddedPiSessionDirect } from "./compact.js";
 import { resolveGlobalLane, resolveSessionLane } from "./lanes.js";
 import { log } from "./logger.js";
@@ -625,7 +626,19 @@ export async function runEmbeddedPiAgent(
             }
           }
 
-          const usage = normalizeUsage(lastAssistant?.usage as UsageLike);
+          let usage = normalizeUsage(lastAssistant?.usage as UsageLike);
+          // Fallback: estimate tokens from message content when provider doesn't
+          // report usage (e.g. subscription/OAuth providers like Codex).
+          if (!hasNonzeroUsage(usage) && !attempt.aborted && !attempt.promptError) {
+            const estimated = estimateMessagesTokens(attempt.messagesSnapshot);
+            if (estimated > 0) {
+              // Split estimate: last assistant output vs everything else as input.
+              const lastContent = attempt.assistantTexts.join("");
+              const outputEst = Math.ceil(lastContent.length / 4) || Math.ceil(estimated * 0.3);
+              const inputEst = Math.max(0, estimated - outputEst);
+              usage = { input: inputEst, output: outputEst, total: estimated };
+            }
+          }
           const agentMeta: EmbeddedPiAgentMeta = {
             sessionId: sessionIdUsed,
             provider: lastAssistant?.provider ?? provider,

@@ -118,13 +118,17 @@ function fallbackEvaluation(criteria: string[], reason: string): EvaluationResul
 // Run final evaluation
 // ---------------------------------------------------------------------------
 
+export type FinalEvaluationResult = EvaluationResult & {
+  tokenUsage?: { input: number; output: number; total: number };
+};
+
 export async function runFinalEvaluation(params: {
   plan: PlanState;
   coreDeps: CoreDeps;
   cfg: CoreConfig;
   cliDeps: CoreCliDeps;
   logger: Logger;
-}): Promise<EvaluationResult> {
+}): Promise<FinalEvaluationResult> {
   const { plan, coreDeps, cfg, cliDeps, logger } = params;
   const startMs = Date.now();
 
@@ -145,6 +149,7 @@ export async function runFinalEvaluation(params: {
 
   const sessionKey = `planner-eval:${plan.id}`;
   let resultText = "";
+  let tokenUsage: { input: number; output: number; total: number } | undefined;
 
   try {
     const result = await coreDeps.runCronIsolatedAgentTurn({
@@ -156,6 +161,7 @@ export async function runFinalEvaluation(params: {
       agentId: "qa",
     });
 
+    tokenUsage = result.tokenUsage;
     if (result.status === "error") {
       logger.warn(`Evaluator returned error for plan ${plan.id}: ${result.error}`);
       resultText = result.error ?? "";
@@ -178,5 +184,5 @@ export async function runFinalEvaluation(params: {
     durationMs,
   });
 
-  return evalResult;
+  return { ...evalResult, tokenUsage };
 }
