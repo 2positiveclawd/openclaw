@@ -495,16 +495,24 @@ export function createBrowserTool(opts?: {
                 profile,
               });
           if (snapshot.format === "ai") {
+            // Cap snapshot text at maxChars to prevent unbounded context growth.
+            // snapshotRoleViaPlaywright (labels/interactive) bypasses the server-side
+            // maxChars, so enforce it here as a safety net.
+            const capChars = resolvedMaxChars ?? DEFAULT_AI_SNAPSHOT_MAX_CHARS;
+            const cappedText =
+              typeof snapshot.snapshot === "string" && snapshot.snapshot.length > capChars
+                ? `${snapshot.snapshot.slice(0, capChars)}\n…(snapshot truncated at ${capChars} chars)…`
+                : snapshot.snapshot;
             if (labels && snapshot.imagePath) {
               return await imageResultFromFile({
                 label: "browser:snapshot",
                 path: snapshot.imagePath,
-                extraText: snapshot.snapshot,
+                extraText: cappedText,
                 details: snapshot,
               });
             }
             return {
-              content: [{ type: "text", text: snapshot.snapshot }],
+              content: [{ type: "text", text: cappedText }],
               details: snapshot,
             };
           }
