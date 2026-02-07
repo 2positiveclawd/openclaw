@@ -68,6 +68,19 @@ Use SSS when:
 
 ---
 
+### Pre-Proposal Validation (MANDATORY)
+
+Before filing any scout proposal, you **MUST** verify the issue still exists in the current codebase:
+
+1. **Check false positives list** — Read `memory/knowledge/scout-false-positives.md`. If the issue matches an entry, verdict is **SKIP**.
+2. **Check recent commits** — Run `git log --oneline -20` in the dev tree (`/home/azureuser/openclaw/`). If a recent commit already addressed the issue, verdict is **SKIP**.
+3. **Read the actual source** — Confirm the buggy code pattern is still present. Do NOT rely solely on gateway logs — logs may contain errors from before a fix was deployed but after the last gateway restart.
+4. **Log false positives** — If you find the issue is already fixed, append it to `memory/knowledge/scout-false-positives.md` so future runs skip it too.
+
+**Rule:** Old gateway log errors do NOT prove a bug still exists. Always verify in source code.
+
+---
+
 ### Phase 2: ASSESS (Validate)
 
 **Goal:** Prove the idea is feasible before writing any code.
