@@ -6,10 +6,15 @@
 // were in "running" state when the gateway last stopped. On stop, aborts all
 // active loops and persists their state.
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type { CoreCliDeps, CoreConfig, CoreDeps } from "./core-bridge.js";
 import type { GoalLoopPluginConfig, GoalNotifyConfig, GoalState } from "./types.js";
-import { listGoals, readGoal, writeGoal } from "./state.js";
 import { getActiveGoalIds, isGoalRunning, runGoalLoop, stopGoalLoop } from "./loop-engine.js";
+import { listGoals, readGoal, writeGoal } from "./state.js";
+
+const GOALS_FILE = path.join(os.homedir(), ".openclaw", "goal-loop", "goals.json");
 
 type Logger = {
   info: (message: string) => void;
@@ -110,6 +115,28 @@ export function createGoalLoopService(params: {
     });
   };
 
+  // Scan goals.json for new "running" goals not yet tracked by the engine.
+  // Called on startup and whenever the file changes.
+  const pickUpNewGoals = (): void => {
+    try {
+      const goals = listGoals();
+      for (const goal of goals) {
+        if (
+          (goal.status === "running" || goal.status === "evaluating") &&
+          !isGoalRunning(goal.id)
+        ) {
+          logger.info(`Picking up new goal ${goal.id}`);
+          startGoal(goal);
+        }
+      }
+    } catch (err) {
+      logger.error(`Error scanning for new goals: ${err}`);
+    }
+  };
+
+  let watcher: fs.FSWatcher | null = null;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   return {
     id: "goal-loop",
 
@@ -120,20 +147,31 @@ export function createGoalLoopService(params: {
       }
       logger.info("Goal loop service starting");
 
-      const goals = listGoals();
-      const resumable = goals.filter(
-        (g) => g.status === "running" || g.status === "evaluating",
-      );
-      if (resumable.length > 0) {
-        logger.info(`Resuming ${resumable.length} goal(s)`);
-        for (const goal of resumable.slice(0, pluginConfig.maxConcurrentGoals)) {
-          startGoal(goal);
-        }
+      // Pick up any goals already in running state
+      pickUpNewGoals();
+
+      // Watch goals.json for changes (e.g. CLI starting a new goal)
+      try {
+        watcher = fs.watch(GOALS_FILE, () => {
+          // Debounce: atomic writes trigger multiple events
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(pickUpNewGoals, 500);
+        });
+        watcher.on("error", (err) => {
+          logger.warn(`Goals file watcher error: ${err}`);
+        });
+      } catch (err) {
+        logger.warn(`Could not watch goals.json, falling back to polling: ${err}`);
       }
     },
 
     stop: async (_ctx: ServiceContext) => {
       logger.info("Goal loop service stopping");
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (watcher) {
+        watcher.close();
+        watcher = null;
+      }
       const activeIds = getActiveGoalIds();
       for (const id of activeIds) {
         stopGoalLoop(id);
