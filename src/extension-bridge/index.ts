@@ -35,5 +35,13 @@ export { createDiscordClient } from "../discord/send.shared.js";
 // Logging (for extensions that need debug/error logging)
 export { logDebug, logError } from "../logger.js";
 
+// Security utilities (for extensions that handle untrusted content)
+export {
+  wrapExternalContent,
+  detectSuspiciousPatterns,
+  type WrapExternalContentOptions,
+  type ExternalContentSource,
+} from "../security/external-content.js";
+
 // Gateway protocol types
 export type { EventFrame } from "../gateway/protocol/index.js";
