@@ -1,245 +1,98 @@
-# OpenClawd Deployment Context
+# Deployment Context
 
-> **IMPORTANT:** This section describes the LOCAL deployment. Prefer this context over generic openclaw docs for operational tasks.
+> **IMPORTANT:** OpenClaw TypeScript gateway is RETIRED (stopped 2026-02-08). The active runtime is **AgentHub .NET daemon**.
 
 ## GitHub Repositories
 
-| Repo                             | Purpose                                                | Branch |
-| -------------------------------- | ------------------------------------------------------ | ------ |
-| `2positiveclawd/openclaw`        | Fork with extensions (goal-loop, planner, trend-scout) | `main` |
-| `2positiveclawd/snake-game`      | Deployed game demo                                     | `main` |
-| `~/projects/openclawd-dashboard` | Local dashboard (NOT on Vercel)                        | `main` |
+| Repo                         | Purpose                                       | Branch |
+| ---------------------------- | --------------------------------------------- | ------ |
+| `2positiveclawd/openclaw`    | Fork (retired — reference only for .NET port) | `main` |
+| `2positiveclawd/LifeManager` | AgentHub .NET daemon (active)                 | `main` |
 
-## Mission Control Dashboard
+## AgentHub .NET Daemon (Active Runtime)
 
-**Full documentation:** See `docs/fork/DASHBOARD.md`
+**Source:** `/home/azureuser/projects/LifeManager`
+**Solution:** `AgentHub.sln` (.NET 9)
+**Daemon project:** `src/AgentHub.Daemon/`
+**Health port:** 5050
+**Systemd service:** `agenthub-daemon` (system-level)
 
-The local-first dashboard at `~/projects/openclawd-dashboard` provides monitoring and control for all agent execution. Key pages:
-
-- `/command` — Unified Kanban board (goals/plans/research as "missions")
-- `/goals/[id]`, `/plans/[id]` — Detail drilldowns
-- `/agents` — Agent management, souls, tool calls
-- `/analytics` — Usage charts, cost breakdown
-- `/automation` — Templates, webhooks, chains
-- `/cron`, `/system`, `/security`, `/trends` — System pages
-
-**Redirects:** `/`, `/goals`, `/plans`, `/research` all redirect to `/command`
-
-**Run:** `cd ~/projects/openclawd-dashboard && npm run dev` → `http://localhost:3000`
-
-**Agent requirement:** When making changes to the dashboard, update `docs/fork/DASHBOARD.md` to reflect those changes. Keep the doc in sync with the actual dashboard features.
-
-## Agent Architecture
-
-**Full documentation:** See `docs/fork/AGENTS-GUIDE.md`
-
-Each agent has independent context with isolated sessions and workspaces:
-
-| Component | Location                                             |
-| --------- | ---------------------------------------------------- |
-| Config    | `~/.openclaw/openclaw.json` (agents.list + bindings) |
-| Sessions  | `~/.openclaw/agents/{agent-id}/sessions/*.jsonl`     |
-| Workspace | `~/.openclaw/workspace-{agent-id}/`                  |
-| Soul      | `{workspace}/SOUL.md`                                |
-
-### Current Agents (24 total)
-
-**System agents:** main, travel, researcher, executor, qa, planner
-
-**Agent Packs (18 agents):**
-| Pack | Agents |
-|------|--------|
-| Content Creator | mia-strategist, blake-scriptwriter, jordan-social |
-| Dev Team | marcus-techlead, elena-reviewer, sam-docs |
-| Solopreneur | claire-assistant, leo-researcher, harper-outreach |
-| Fitness Training | noah-coach, nina-nutrition, ethan-accountability |
-| Health & Wellness | olivia-wellness, mason-sleep, priya-habits |
-| Finance & Taxes | sophia-invoices, liam-expenses, nora-tax |
-
-### Agent Capabilities
-
-| Feature                       | Status     | Details                                            |
-| ----------------------------- | ---------- | -------------------------------------------------- |
-| **Multi-Agent Communication** | ✅ Ready   | `sessions_spawn` + `sessions_send` tools           |
-| **Persistent Memory**         | ✅ Enabled | SQLite + embeddings, per-agent isolation           |
-| **Routing**                   | Static     | 1:1 channel bindings (no intent-based routing yet) |
-
-**Multi-agent delegation:** Agents can spawn subagents via allowlists. Configure `agents[].subagents.allowAgents` in config.
-
-**Memory:** Automatically indexes `MEMORY.md` + session transcripts. Searchable via embeddings.
-
-See `docs/fork/AGENTS-GUIDE.md` for full documentation.
-
-### Creating New Agents
-
-Two approaches:
-
-1. **Agent Packs** (recommended for teams) — Define in `extensions/agent-packs/src/packs-registry.ts`
-2. **Standalone** — Add directly to `~/.openclaw/openclaw.json`
-
-Quick standalone setup:
+### Quick Deploy (new version)
 
 ```bash
-# 1. Create directories
-mkdir -p ~/.openclaw/agents/my-agent/sessions
-mkdir -p ~/.openclaw/workspace-my-agent
-
-# 2. Create SOUL.md
-echo "# MyAgent\nYou are MyAgent..." > ~/.openclaw/workspace-my-agent/SOUL.md
-
-# 3. Add to config (agents.list + bindings)
-# 4. Restart gateway
-systemctl --user restart openclaw-gateway
+cd /home/azureuser/projects/LifeManager
+git pull origin main
+dotnet publish src/AgentHub.Daemon/AgentHub.Daemon.csproj -c Release -o /opt/agenthub/app
+ln -sf /opt/agenthub/config/appsettings.Production.json /opt/agenthub/app/appsettings.Production.json
+sudo systemctl restart agenthub-daemon
+sudo journalctl -u agenthub-daemon -f --no-pager -n 30
 ```
 
-See `docs/fork/AGENTS-GUIDE.md` for complete instructions.
-
-## Fork Organization & Packaging
-
-**Full documentation:** See `docs/fork/PACKAGING-AUDIT.md`
-
-Maps every piece of fork-specific code relative to upstream. The fork adds ~17K lines across 5 layers:
-
-| Layer                       | What                                                                            | Status                                                |
-| --------------------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| **Extensions** (6)          | `extensions/{goal-loop,planner,researcher,trend-scout,agent-packs,automation}/` | Ready — self-contained workspace packages             |
-| **Core Patches** (10 files) | Plugin-SDK bridge, browser stealth, gateway client                              | Needs formalization as `.patch` files or upstream PRs |
-| **Discord Additions**       | Moved to extensions; `scripts/scout-notify.ts` remains as CLI tool              | Done — via generic component registry                 |
-| **Supporting Files**        | `docs/fork/`, `deploy/`                                                         | Ready — already isolated                              |
-| **External Ecosystem**      | Skills at `~/.openclaw/extensions/`, config, wrappers, systemd override         | Needs setup script for bootstrapping                  |
-
-**Agent requirement:** When adding, removing, or restructuring fork-specific code (extensions, core patches, Discord additions, deploy files, skills), update `docs/fork/PACKAGING-AUDIT.md` to reflect the changes.
-
-## Extension Development: jiti/dist instanceof Gotcha
-
-**Full documentation:** See `docs/fork/PACKAGING-AUDIT.md` (Patch 1b) and `src/discord/monitor/component-registry.ts`
-
-Extensions are loaded at runtime via jiti (TypeScript transpiler), which resolves `@buape/carbon` from `node_modules/`. The gateway's built `dist/` bundles its own copy of `@buape/carbon`. These are **different class objects**, so `instanceof` checks across these boundaries **always fail**.
-
-**Rule:** Never pass class instances (e.g., `Button`, `Command`) from jiti-loaded extension code to bundled core code when `instanceof` checks are involved. Use plain spec objects instead.
-
-**Pattern (Discord buttons):**
-
-1. Extension calls `registerDiscordButton({ customId, run, ... })` with a plain `DiscordButtonSpec` object
-2. Provider calls `drainDiscordButtonSpecs()` which creates real `Button` subclass instances using the **bundled** class
-3. Carbon's `ComponentHandler` sees proper `instanceof Button` = `true`
-
-**Key files:**
-
-- `src/discord/monitor/component-registry.ts` — Spec registry + `createButtonFromSpec()`
-- `src/extension-bridge/index.ts` — Exports `registerDiscordButton`, `DiscordButtonSpec`
-- `extensions/trend-scout/src/discord-buttons.ts` — Uses `createScoutProposalButtonSpec()`
-- `extensions/researcher/src/discord-questions.ts` — Uses `createResearcherQuestionButtonSpec()`
-
-## Scout-Spec-Ship (System Improvement Playbook)
-
-**Full documentation:** See `docs/fork/SCOUT-SPEC-SHIP.md`
-
-When discovering improvement opportunities during normal work, follow the **Scout-Spec-Ship (SSS)** pattern:
-
-1. **SCOUT** — Identify the problem and brainstorm solutions (5-10 min)
-2. **ASSESS** — Validate feasibility by reading source code, checking existing solutions (15-30 min)
-3. **SPEC** — Write a concrete plan with files to change, test plan, rollback plan
-4. **BUILD** — Implement incrementally, testing each piece as you go
-5. **VERIFY** — Run E2E tests proving the whole flow works
-6. **SHIP** — Commit, push, document, restart, verify in production
-
-**Key rules:**
-
-- Gate each phase: kill bad ideas early (SCOUT/ASSESS) before investing build time
-- Memory-first: check `memory_search` before `web_search` (shared knowledge at `memory/knowledge/`)
-- File scout notes at `memory/knowledge/research/YYYY-MM-DD-scout-{topic}.md` for nightly review
-- Proposals awaiting approval go to `memory/scout-proposals/`
-
-## Runtime: Systemd (Active)
+### Service Management
 
 ```
-Gateway: systemctl --user {start|stop|restart|status} openclaw-gateway
-Port: 18789 (loopback only)
-Config: ~/.openclaw/openclaw.json
-Secrets: ~/.openclaw/.secrets.env (chmod 600)
-Logs: journalctl --user -u openclaw-gateway -f
+Status:  sudo systemctl status agenthub-daemon
+Start:   sudo systemctl start agenthub-daemon
+Stop:    sudo systemctl stop agenthub-daemon
+Restart: sudo systemctl restart agenthub-daemon
+Logs:    sudo journalctl -u agenthub-daemon -f
+Health:  curl http://localhost:5050/health
 ```
 
-## Runtime: Docker (Available)
+### Configuration
 
-```
-Build: docker compose -f deploy/docker-compose.gateway.yml build
-Run: docker compose -f deploy/docker-compose.gateway.yml up -d
-Image: openclawd-gateway:latest (3.85GB)
-Config: deploy/.env (create from .env.example)
-```
+| File                                               | Purpose                          |
+| -------------------------------------------------- | -------------------------------- |
+| `appsettings.json`                                 | Defaults (checked in)            |
+| `/opt/agenthub/config/appsettings.Production.json` | Secrets + overrides (NOT in git) |
 
-Docker mounts `~/.openclaw` at same path for config compatibility.
+**Required config keys:**
 
-**Build tips:**
+- `Cosmos:Endpoint` — Azure Cosmos DB endpoint
+- `OpenAI:Endpoint` — Azure OpenAI endpoint (https://konta-m9ok6570-eastus2.openai.azure.com)
+- `OpenAI:DeploymentName` — Chat model (default: gpt-4o-mini)
+- `OpenAI:EmbeddingDeploymentName` — Embedding model (default: text-embedding-3-small)
+- `Discord:ClawdBotToken` — Discord bot token
 
-- Avoid `--no-cache` unless you changed the Dockerfile or base image. It forces full rebuild (~13 min).
-- Normal rebuild (code changes only): ~1-2 min with layer caching.
-- Use `--no-cache` only when: changing Dockerfile, updating base image, or debugging build issues.
+**Optional:** `Brave:ApiKey`, `Discord:WebhookUrl`, `Discord:WebhookUrl:GoalLoop`, `Discord:WebhookUrl:Planner`
 
-## Security Posture
+### Auth: Managed Identity
 
-| Layer           | Setting                  | Status        |
-| --------------- | ------------------------ | ------------- |
-| Gateway binding | `loopback`               | ✅ Local only |
-| Gateway auth    | Token required           | ✅ Active     |
-| Discord policy  | `allowlist`              | ✅ Restricted |
-| Browser sandbox | `noSandbox: false`       | ✅ Enabled    |
-| Secrets         | Separate file, 600 perms | ✅ Isolated   |
+Authentication uses `DefaultAzureCredential` via VM System-Assigned Managed Identity. No API keys or Azure CLI on the VM.
 
-**Secrets location:** `~/.openclaw/.secrets.env`
+Roles assigned to VM identity:
 
-```
-AZURE_OPENAI_API_KEY, DISCORD_BOT_TOKEN, NOTION_API_KEY,
-OPENCLAW_GATEWAY_TOKEN, REDDIT_CLIENT_SECRET
-```
+- **Cosmos DB Built-in Data Contributor** on the Cosmos DB account (data plane only)
+- **Cognitive Services OpenAI User** on the Azure OpenAI resource
 
-## Agent Capabilities (Discord bot)
+**SECURITY:** Do NOT install Azure CLI on the VM. The daemon has an `exec` tool — prompt injection + Azure CLI = full Azure account compromise. Managed Identity is VM-bound, cannot be exfiltrated, and scoped to only the assigned roles.
 
-| Tool         | Capability       | Isolation                            |
-| ------------ | ---------------- | ------------------------------------ |
-| `exec`       | Shell commands   | Container if Docker, host if systemd |
-| `read/write` | File access      | `~/.openclaw/workspace*` only        |
-| `browser`    | Puppeteer/Chrome | Sandboxed                            |
-| `git`        | Version control  | Workspace scoped                     |
+### Architecture
 
-**Workspaces:**
+Background services:
 
-- `~/.openclaw/workspace/` — Main (committed to git)
-- `~/.openclaw/workspace-{travel,researcher,executor}/` — Subagents
+- `GoalLoopBackgroundService` — Autonomous goal pursuit (iterate → evaluate → govern)
+- `PlannerBackgroundService` — DAG task orchestration (decompose → parallel execute → replan)
+- `DiscordGatewayService` — Discord bot gateway (DMs, mentions, button interactions)
+- `AgentSchedulerService` — Scheduled agent runs (cron-like)
+- `BackgroundAgentHostService` — Long-running background agents
 
-## Data Persistence
+State: Azure Cosmos DB (`agenthub-db`)
+LLM: Azure OpenAI (via Semantic Kernel)
+Workspace: `/opt/agenthub/workspace`
 
-| Data            | Location                           | In Git?             |
-| --------------- | ---------------------------------- | ------------------- |
-| Agent workspace | `~/.openclaw/workspace/`           | ✅ Yes              |
-| Goal-loop state | `~/.openclaw/goal-loop/goals.json` | ❌ No               |
-| Planner state   | `~/.openclaw/planner/plans.json`   | ❌ No               |
-| Config          | `~/.openclaw/openclaw.json`        | ❌ No (has secrets) |
-| Dashboard       | `~/projects/openclawd-dashboard/`  | ✅ Local git        |
+### Verification doc
 
-## Backup (Disabled, Available)
+See `docs/OPENCLAW-PORT-VERIFICATION.md` for the full port verification report comparing AgentHub against the OpenClaw TypeScript implementation.
 
-Scripts in `deploy/`: `backup.sh`, `restore.sh`, `install-backup-cron.sh`
-Not running — only needed if using WhatsApp/Signal (browser sessions).
+## Retired: OpenClaw TypeScript Gateway
 
-## NEVER Do
+**Status:** Stopped and disabled as of 2026-02-08.
+**Service:** `systemctl --user status openclaw-gateway` (inactive/disabled)
+**Config:** `~/.openclaw/openclaw.json` (preserved for reference)
+**Data:** `~/.openclaw/` directory preserved (goals.json, plans.json, sessions, workspaces)
 
-- `openclaw goal status <id>` — hangs, freezes session
-- `openclaw goal list` without timeout — can hang
-- `openclaw planner status <id>` — same hang risk
-- Deploy dashboard to Vercel — local only
-
-**Safe alternatives:**
-
-```bash
-# Goal status
-cat ~/.openclaw/goal-loop/goals.json | jq '.goals[-1]'
-
-# With timeout
-timeout 5 openclaw goal list 2>&1
-```
+The OpenClaw fork code at `/home/azureuser/openclaw/` is kept as reference for the .NET port but is no longer running.
 
 ---
 
