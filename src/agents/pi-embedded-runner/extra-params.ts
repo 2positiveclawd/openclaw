@@ -10,10 +10,16 @@ const OPENROUTER_APP_HEADERS: Record<string, string> = {
 };
 const ANTHROPIC_CONTEXT_1M_BETA = "context-1m-2025-08-07";
 const ANTHROPIC_1M_MODEL_PREFIXES = ["claude-opus-4", "claude-sonnet-4"] as const;
-// NOTE: We only force `store=true` for *direct* OpenAI Responses.
-// Codex responses (chatgpt.com/backend-api/codex/responses) require `store=false`.
+// NOTE: We force `store=true` for OpenAI "Responses API" style backends when the
+// client uses server-side continuation (e.g. previous_response_id). pi-ai hardcodes
+// `store:false`, which can break multi-turn flows when ids are referenced.
+//
+// Kept narrowly scoped:
+// - Applies only to models using the `openai-responses` API
+// - Applies to OpenAI and Azure OpenAI providers
+// - Does NOT apply to Codex backend-api/codex/responses (requires store=false)
 const OPENAI_RESPONSES_APIS = new Set(["openai-responses"]);
-const OPENAI_RESPONSES_PROVIDERS = new Set(["openai"]);
+const OPENAI_RESPONSES_PROVIDERS = new Set(["openai", "azure"]);
 
 /**
  * Resolve provider-specific extra params from model config.
@@ -139,7 +145,19 @@ function shouldForceResponsesStore(model: {
   if (!OPENAI_RESPONSES_PROVIDERS.has(model.provider)) {
     return false;
   }
-  return isDirectOpenAIBaseUrl(model.baseUrl);
+
+  // OpenAI provider: only force when talking to OpenAI-controlled hosts.
+  if (model.provider === "openai") {
+    return isDirectOpenAIBaseUrl(model.baseUrl);
+  }
+
+  // Azure OpenAI uses a different hostname (resource.openai.azure.com) but still
+  // supports Responses API semantics (including store + previous_response_id).
+  if (model.provider === "azure") {
+    return true;
+  }
+
+  return false;
 }
 
 function createOpenAIResponsesStoreWrapper(baseStreamFn: StreamFn | undefined): StreamFn {

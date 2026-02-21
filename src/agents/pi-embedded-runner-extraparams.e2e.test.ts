@@ -264,6 +264,20 @@ describe("applyExtraParamsToAgent", () => {
     expect(payload.store).toBe(true);
   });
 
+  it("forces store=true for Azure OpenAI Responses payloads", () => {
+    const payload = runStoreMutationCase({
+      applyProvider: "azure",
+      applyModelId: "gpt-5",
+      model: {
+        api: "openai-responses",
+        provider: "azure",
+        id: "gpt-5",
+        baseUrl: "https://example.openai.azure.com/openai",
+      } as unknown as Model<"openai-responses">,
+    });
+    expect(payload.store).toBe(true);
+  });
+
   it("does not force store for OpenAI Responses routed through non-OpenAI base URLs", () => {
     const payload = runStoreMutationCase({
       applyProvider: "openai",
