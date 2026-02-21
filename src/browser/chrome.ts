@@ -22,7 +22,6 @@ import {
   DEFAULT_OPENCLAW_BROWSER_COLOR,
   DEFAULT_OPENCLAW_BROWSER_PROFILE_NAME,
 } from "./constants.js";
-import { getStealthLaunchArgs } from "./stealth.js";
 
 const log = createSubsystemLogger("browser").child("chrome");
 
@@ -214,17 +213,10 @@ export async function launchOpenClawChrome(
     if (process.platform === "linux") {
       args.push("--disable-dev-shm-usage");
     }
-    if (resolved.stealth) {
-      args.push(...getStealthLaunchArgs({ headless: resolved.headless }));
-    }
-    if (resolved.proxy) {
-      args.push(`--proxy-server=${resolved.proxy}`);
-    }
-
     // Stealth: hide navigator.webdriver from automation detection (#80)
     args.push("--disable-blink-features=AutomationControlled");
 
-    // Append user-configured extra arguments (e.g., stealth flags, window size)
+    // Append user-configured extra arguments (e.g., stealth flags, proxy, window size)
     if (resolved.extraArgs.length > 0) {
       args.push(...resolved.extraArgs);
     }

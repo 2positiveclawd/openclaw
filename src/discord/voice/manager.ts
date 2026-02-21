@@ -1,17 +1,15 @@
 import type { VoicePlugin } from "@buape/carbon/voice";
+import type { AudioPlayer, VoiceConnection } from "@discordjs/voice";
 import type { Readable } from "node:stream";
 import { ChannelType, type Client, ReadyListener } from "@buape/carbon";
-import {
-  AudioPlayerStatus,
-  EndBehaviorType,
-  VoiceConnectionStatus,
-  createAudioPlayer,
-  createAudioResource,
-  entersState,
-  joinVoiceChannel,
-  type AudioPlayer,
-  type VoiceConnection,
-} from "@discordjs/voice";
+
+let _voiceModule: typeof import("@discordjs/voice") | null = null;
+async function getVoiceModule() {
+  if (!_voiceModule) {
+    _voiceModule = await import("@discordjs/voice");
+  }
+  return _voiceModule;
+}
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -37,7 +35,13 @@ import { parseTtsDirectives } from "../../tts/tts-core.js";
 import { resolveTtsConfig, textToSpeech, type ResolvedTtsConfig } from "../../tts/tts.js";
 
 const require = createRequire(import.meta.url);
-const OpusScript = require("opusscript") as typeof import("opusscript");
+let _OpusScript: typeof import("opusscript") | null = null;
+function getOpusScript() {
+  if (!_OpusScript) {
+    _OpusScript = require("opusscript") as typeof import("opusscript");
+  }
+  return _OpusScript;
+}
 
 const SAMPLE_RATE = 48_000;
 const CHANNELS = 2;
@@ -149,6 +153,7 @@ type OpusDecoder = {
 
 function createOpusDecoder(): { decoder: OpusDecoder; name: string } | null {
   try {
+    const OpusScript = getOpusScript();
     const decoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO);
     return { decoder, name: "opusscript" };
   } catch (err) {
@@ -363,8 +368,9 @@ export class DiscordVoiceManager {
       return { ok: false, message: "Discord voice plugin is not available." };
     }
 
+    const voice = await getVoiceModule();
     const adapterCreator = voicePlugin.getGatewayAdapterCreator(guildId);
-    const connection = joinVoiceChannel({
+    const connection = voice.joinVoiceChannel({
       channelId,
       guildId,
       adapterCreator,
@@ -373,7 +379,11 @@ export class DiscordVoiceManager {
     });
 
     try {
-      await entersState(connection, VoiceConnectionStatus.Ready, PLAYBACK_READY_TIMEOUT_MS);
+      await voice.entersState(
+        connection,
+        voice.VoiceConnectionStatus.Ready,
+        PLAYBACK_READY_TIMEOUT_MS,
+      );
       logVoiceVerbose(`join: connected to guild ${guildId} channel ${channelId}`);
     } catch (err) {
       connection.destroy();
@@ -396,7 +406,7 @@ export class DiscordVoiceManager {
       peer: { kind: "channel", id: sessionChannelId },
     });
 
-    const player = createAudioPlayer();
+    const player = voice.createAudioPlayer();
     connection.subscribe(player);
 
     const entry: VoiceSessionEntry = {
@@ -422,22 +432,22 @@ export class DiscordVoiceManager {
     };
 
     connection.receiver.speaking.on("start", speakingHandler);
-    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+    connection.on(voice.VoiceConnectionStatus.Disconnected, async () => {
       try {
         await Promise.race([
-          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
-          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+          voice.entersState(connection, voice.VoiceConnectionStatus.Signalling, 5_000),
+          voice.entersState(connection, voice.VoiceConnectionStatus.Connecting, 5_000),
         ]);
       } catch {
         this.sessions.delete(guildId);
         connection.destroy();
       }
     });
-    connection.on(VoiceConnectionStatus.Destroyed, () => {
+    connection.on(voice.VoiceConnectionStatus.Destroyed, () => {
       this.sessions.delete(guildId);
     });
 
-    player.on("error", (err) => {
+    player.on("error", (err: Error) => {
       logger.warn(`discord voice: playback error: ${formatErrorMessage(err)}`);
     });
 
@@ -498,21 +508,22 @@ export class DiscordVoiceManager {
       return;
     }
 
+    const voice = await getVoiceModule();
     entry.activeSpeakers.add(userId);
     logVoiceVerbose(
       `capture start: guild ${entry.guildId} channel ${entry.channelId} user ${userId}`,
     );
-    if (entry.player.state.status === AudioPlayerStatus.Playing) {
+    if (entry.player.state.status === voice.AudioPlayerStatus.Playing) {
       entry.player.stop(true);
     }
 
     const stream = entry.connection.receiver.subscribe(userId, {
       end: {
-        behavior: EndBehaviorType.AfterSilence,
+        behavior: voice.EndBehaviorType.AfterSilence,
         duration: SILENCE_DURATION_MS,
       },
     });
-    stream.on("error", (err) => {
+    stream.on("error", (err: Error) => {
       logger.warn(`discord voice: receive error: ${formatErrorMessage(err)}`);
     });
 
@@ -629,14 +640,15 @@ export class DiscordVoiceManager {
       logVoiceVerbose(
         `playback start: guild ${entry.guildId} channel ${entry.channelId} file ${path.basename(audioPath)}`,
       );
-      const resource = createAudioResource(audioPath);
+      const voice = await getVoiceModule();
+      const resource = voice.createAudioResource(audioPath);
       entry.player.play(resource);
-      await entersState(entry.player, AudioPlayerStatus.Playing, PLAYBACK_READY_TIMEOUT_MS).catch(
-        () => undefined,
-      );
-      await entersState(entry.player, AudioPlayerStatus.Idle, SPEAKING_READY_TIMEOUT_MS).catch(
-        () => undefined,
-      );
+      await voice
+        .entersState(entry.player, voice.AudioPlayerStatus.Playing, PLAYBACK_READY_TIMEOUT_MS)
+        .catch(() => undefined);
+      await voice
+        .entersState(entry.player, voice.AudioPlayerStatus.Idle, SPEAKING_READY_TIMEOUT_MS)
+        .catch(() => undefined);
       logVoiceVerbose(`playback done: guild ${entry.guildId} channel ${entry.channelId}`);
     });
   }

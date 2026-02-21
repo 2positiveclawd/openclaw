@@ -1,5 +1,5 @@
 import { GatewayIntents, GatewayPlugin } from "@buape/carbon/gateway";
-import { HttpsProxyAgent } from "https-proxy-agent";
+// Lazy-imported: https-proxy-agent is an optional dependency
 import WebSocket from "ws";
 import type { DiscordAccountConfig } from "../../config/types.js";
 import type { RuntimeEnv } from "../../runtime.js";
@@ -25,10 +25,10 @@ export function resolveDiscordGatewayIntents(
   return intents;
 }
 
-export function createDiscordGatewayPlugin(params: {
+export async function createDiscordGatewayPlugin(params: {
   discordConfig: DiscordAccountConfig;
   runtime: RuntimeEnv;
-}): GatewayPlugin {
+}): Promise<GatewayPlugin> {
   const intents = resolveDiscordGatewayIntents(params.discordConfig?.intents);
   const proxy = params.discordConfig?.proxy?.trim();
   const options = {
@@ -42,6 +42,7 @@ export function createDiscordGatewayPlugin(params: {
   }
 
   try {
+    const { HttpsProxyAgent } = await import("https-proxy-agent");
     const agent = new HttpsProxyAgent<string>(proxy);
 
     params.runtime.log?.("discord: gateway proxy enabled");

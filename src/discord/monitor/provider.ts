@@ -463,18 +463,6 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
     );
   }
 
-  // Get gateway auth token for internal WebSocket connections
-  // Check config first, then fall back to environment variable (same as resolveGatewayAuth)
-  const gatewayAuth = cfg.gateway?.auth;
-  const gatewayAuthToken =
-    (typeof gatewayAuth === "object" && gatewayAuth !== null
-      ? (gatewayAuth as { token?: string }).token
-      : typeof gatewayAuth === "string"
-        ? gatewayAuth
-        : undefined) ??
-    process.env.OPENCLAW_GATEWAY_TOKEN ??
-    undefined;
-
   // Initialize exec approvals handler if enabled
   const execApprovalsConfig = discordCfg.execApprovals ?? {};
   const execApprovalsHandler = execApprovalsConfig.enabled
@@ -482,7 +470,6 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
         token,
         accountId: account.accountId,
         config: execApprovalsConfig,
-        gatewayToken: gatewayAuthToken,
         cfg,
         runtime,
       })
@@ -556,7 +543,7 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
   }
 
   const clientPlugins: Plugin[] = [
-    createDiscordGatewayPlugin({ discordConfig: discordCfg, runtime }),
+    await createDiscordGatewayPlugin({ discordConfig: discordCfg, runtime }),
   ];
   if (voiceEnabled) {
     clientPlugins.push(new VoicePlugin());

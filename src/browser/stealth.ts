@@ -33,11 +33,20 @@ export function getStealthLaunchArgs(opts: { headless: boolean }): string[] {
   return args;
 }
 
-/** Check config to see if stealth mode is enabled. */
+/**
+ * Check config to see if stealth mode is enabled.
+ *
+ * The legacy `browser.stealth` boolean was removed upstream.
+ * Stealth is now considered enabled when `browser.extraArgs` contains
+ * the `--disable-blink-features=AutomationControlled` flag (or similar).
+ * This helper is kept for call-site compatibility but defaults to false.
+ */
 export function isStealthEnabled(): boolean {
   try {
     const cfg = loadConfig();
-    return cfg?.browser?.stealth === true;
+    const extra: string[] =
+      ((cfg?.browser as Record<string, unknown>)?.extraArgs as string[]) ?? [];
+    return extra.some((a) => typeof a === "string" && a.includes("AutomationControlled"));
   } catch {
     return false;
   }
