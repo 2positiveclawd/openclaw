@@ -140,6 +140,26 @@ export function isUnhandledRejectionHandled(reason: unknown): boolean {
   return false;
 }
 
+/**
+ * Checks if an uncaught exception is recoverable (should not crash the gateway).
+ * Covers transient network errors, Discord gateway reconnection bugs, and abort errors.
+ */
+export function isRecoverableException(err: unknown): boolean {
+  if (isAbortError(err)) {
+    return true;
+  }
+  if (isTransientNetworkError(err)) {
+    return true;
+  }
+  // @buape/carbon GatewayPlugin throws synchronous errors from heartbeat timers
+  // when Discord WebSocket connections enter zombie state. These are non-fatal;
+  // the gateway will re-establish the connection on the next cycle.
+  if (err instanceof Error && /reconnect.*zombie|zombie.*reconnect/i.test(err.message)) {
+    return true;
+  }
+  return false;
+}
+
 export function installUnhandledRejectionHandler(): void {
   process.on("unhandledRejection", (reason, _promise) => {
     if (isUnhandledRejectionHandled(reason)) {

@@ -6,7 +6,10 @@ import { formatUncaughtError } from "../infra/errors.js";
 import { isMainModule } from "../infra/is-main.js";
 import { ensureOpenClawCliOnPath } from "../infra/path-env.js";
 import { assertSupportedRuntime } from "../infra/runtime-guard.js";
-import { installUnhandledRejectionHandler } from "../infra/unhandled-rejections.js";
+import {
+  installUnhandledRejectionHandler,
+  isRecoverableException,
+} from "../infra/unhandled-rejections.js";
 import { enableConsoleCapture } from "../logging.js";
 import { getCommandPath, getPrimaryCommand, hasHelpOrVersion } from "./argv.js";
 import { tryRouteCli } from "./route.js";
@@ -87,6 +90,13 @@ export async function runCli(argv: string[] = process.argv) {
   installUnhandledRejectionHandler();
 
   process.on("uncaughtException", (error) => {
+    if (isRecoverableException(error)) {
+      console.warn(
+        "[openclaw] Recoverable uncaught exception (continuing):",
+        formatUncaughtError(error),
+      );
+      return;
+    }
     console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
     process.exit(1);
   });
