@@ -20,6 +20,36 @@ import { normalizeProviderId } from "./model-selection.js";
 
 export { ensureAuthProfileStore, resolveAuthProfileOrder } from "./auth-profiles.js";
 
+// Azure Managed Identity token cache (VM-based auth without API keys)
+const AZURE_IMDS_URL =
+  "http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https://cognitiveservices.azure.com/";
+let _azureManagedIdentityToken: { token: string; expiresAt: number } | null = null;
+
+async function fetchAzureManagedIdentityToken(): Promise<string> {
+  const now = Date.now();
+  if (_azureManagedIdentityToken && _azureManagedIdentityToken.expiresAt > now + 60_000) {
+    return _azureManagedIdentityToken.token;
+  }
+  const resp = await fetch(AZURE_IMDS_URL, {
+    headers: { Metadata: "true" },
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (!resp.ok) {
+    throw new Error(`Azure managed identity token request failed: ${resp.status}`);
+  }
+  const data = (await resp.json()) as { access_token: string; expires_on: string };
+  _azureManagedIdentityToken = {
+    token: data.access_token,
+    expiresAt: Number(data.expires_on) * 1000,
+  };
+  return _azureManagedIdentityToken.token;
+}
+
+function isAzureProvider(provider: string): boolean {
+  const n = normalizeProviderId(provider);
+  return n === "azure" || n === "azure-openai-responses";
+}
+
 const AWS_BEARER_ENV = "AWS_BEARER_TOKEN_BEDROCK";
 const AWS_ACCESS_KEY_ENV = "AWS_ACCESS_KEY_ID";
 const AWS_SECRET_KEY_ENV = "AWS_SECRET_ACCESS_KEY";
@@ -210,6 +240,17 @@ export async function resolveApiKeyForProvider(params: {
   const normalized = normalizeProviderId(provider);
   if (authOverride === undefined && normalized === "amazon-bedrock") {
     return resolveAwsSdkAuthInfo();
+  }
+
+  // Azure Managed Identity fallback: on Azure VMs without API keys, use the
+  // Instance Metadata Service (IMDS) to obtain a bearer token.
+  if (isAzureProvider(provider)) {
+    try {
+      const token = await fetchAzureManagedIdentityToken();
+      return { apiKey: token, source: "azure-managed-identity", mode: "token" };
+    } catch {
+      // IMDS not available (not on Azure VM) — fall through to error
+    }
   }
 
   if (provider === "openai") {
