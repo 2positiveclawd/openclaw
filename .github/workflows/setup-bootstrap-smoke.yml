@@ -1,0 +1,68 @@
+name: Setup Bootstrap Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: setup-bootstrap-smoke-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  docs-scope:
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect docs-only changes
+        id: check
+        uses: ./.github/actions/detect-docs-changes
+
+  setup-bootstrap-smoke:
+    needs: [docs-scope]
+    if: needs.docs-scope.outputs.docs_only != 'true'
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Basic sanity (lint)
+        run: |
+          bash -n setup.sh
+          bash -n scripts/verify-setup-tree.sh
+
+      - name: Run setup.sh against isolated OPENCLAW_HOME
+        env:
+          OPENCLAW_HOME: ${{ runner.temp }}/openclaw-home/.openclaw
+        run: |
+          set -euo pipefail
+          export HOME="${{ runner.temp }}/openclaw-home"
+          mkdir -p "$HOME"
+
+          # Non-interactive run
+          ./setup.sh < /dev/null
+
+          # Verify tree
+          OPENCLAW_HOME="$OPENCLAW_HOME" bash scripts/verify-setup-tree.sh
+
+          # Spot-check key outputs
+          test -f "$OPENCLAW_HOME/openclaw.json"
+          test -f "$OPENCLAW_HOME/.secrets.env"
+          test -d "$OPENCLAW_HOME/extensions"
+
+      - name: Run setup.sh twice (idempotency check)
+        env:
+          OPENCLAW_HOME: ${{ runner.temp }}/openclaw-home/.openclaw
+        run: |
+          set -euo pipefail
+          export HOME="${{ runner.temp }}/openclaw-home"
+
+          ./setup.sh < /dev/null
+          OPENCLAW_HOME="$OPENCLAW_HOME" bash scripts/verify-setup-tree.sh
