@@ -204,12 +204,18 @@ fi
 
 wrappers_installed=0
 if [[ -d "$BIN_TEMPLATES_DIR" ]]; then
-  install_wrappers="no"
-  if [[ $DRY_RUN -eq 1 ]]; then
-    echo "DRY RUN: skipping wrapper install prompt"
-  else
-    read -r -p "Install CLI wrappers to /usr/local/bin? (requires sudo) [y/N] " install_wrappers
+  # Non-interactive safe default: do not prompt unless stdin is a TTY.
+  # Override via env: OPENCLAW_INSTALL_WRAPPERS=yes|no
+  install_wrappers="${OPENCLAW_INSTALL_WRAPPERS:-}"
+  if [[ -z "$install_wrappers" ]]; then
+    install_wrappers="no"
+    if [[ $DRY_RUN -eq 1 ]]; then
+      echo "DRY RUN: skipping wrapper install prompt"
+    elif [[ -t 0 ]]; then
+      read -r -p "Install CLI wrappers to /usr/local/bin? (requires sudo) [y/N] " install_wrappers
+    fi
   fi
+
   if [[ "$install_wrappers" =~ ^[Yy]$ ]]; then
     for wrapper in "$BIN_TEMPLATES_DIR"/*; do
       [[ -f "$wrapper" ]] || continue
