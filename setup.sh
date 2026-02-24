@@ -119,6 +119,10 @@ render_template_to_file() {
   if [[ $DRY_RUN -eq 1 ]]; then
     echo "DRY RUN: render $src -> $dest"
   else
+    if ! command -v python3 >/dev/null 2>&1; then
+      echo "ERROR: python3 is required to render templates (missing: python3)." >&2
+      exit 1
+    fi
     python3 - <<PY
 from pathlib import Path
 src = Path("$src")
@@ -229,6 +233,10 @@ if [[ -d "$BIN_TEMPLATES_DIR" ]]; then
         echo "DRY RUN: sudo install -m 0755 $wrapper $dest"
       else
         tmp_file="$(mktemp)"
+        if ! command -v python3 >/dev/null 2>&1; then
+          echo "ERROR: python3 is required to install wrappers (missing: python3)." >&2
+          exit 1
+        fi
         python3 - <<PY
 from pathlib import Path
 src = Path("$wrapper")
