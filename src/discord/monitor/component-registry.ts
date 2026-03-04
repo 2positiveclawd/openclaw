@@ -43,10 +43,11 @@ export interface DiscordButtonSpec {
 const REGISTRY_KEY = "__openclaw_discord_button_specs__";
 
 function getSpecs(): DiscordButtonSpec[] {
-  if (!(globalThis as any)[REGISTRY_KEY]) {
-    (globalThis as any)[REGISTRY_KEY] = [];
+  const g = globalThis as unknown as Record<string, unknown>;
+  if (!g[REGISTRY_KEY]) {
+    g[REGISTRY_KEY] = [];
   }
-  return (globalThis as any)[REGISTRY_KEY];
+  return g[REGISTRY_KEY] as DiscordButtonSpec[];
 }
 
 /** Register a button handler spec. Extensions call this during register(). */

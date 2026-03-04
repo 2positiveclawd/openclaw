@@ -1,5 +1,5 @@
-import type { GatewayServiceRenderArgs } from "./service-types.js";
 import { splitArgsPreservingQuotes } from "./arg-split.js";
+import type { GatewayServiceRenderArgs } from "./service-types.js";
 
 const SYSTEMD_LINE_BREAKS = /[\r\n]/;
 
@@ -59,10 +59,9 @@ export function buildSystemdUnit({
     `ExecStart=${execStart}`,
     "Restart=always",
     "RestartSec=5",
-    // KillMode=process ensures systemd only waits for the main process to exit.
-    // Without this, podman's conmon (container monitor) processes block shutdown
-    // since they run as children of the gateway and stay in the same cgroup.
-    "KillMode=process",
+    // Keep service children in the same lifecycle so restarts do not leave
+    // orphan ACP/runtime workers behind.
+    "KillMode=control-group",
     workingDirLine,
     ...envLines,
     "",

@@ -1,9 +1,11 @@
 import { GatewayIntents, GatewayPlugin } from "@buape/carbon/gateway";
-// Lazy-imported: https-proxy-agent is an optional dependency
+import type { APIGatewayBotInfo } from "discord-api-types/v10";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { ProxyAgent, fetch as undiciFetch } from "undici";
 import WebSocket from "ws";
 import type { DiscordAccountConfig } from "../../config/types.js";
-import type { RuntimeEnv } from "../../runtime.js";
 import { danger } from "../../globals.js";
+import type { RuntimeEnv } from "../../runtime.js";
 
 export function resolveDiscordGatewayIntents(
   intentsConfig?: import("../../config/types.discord.js").DiscordIntentsConfig,
@@ -25,10 +27,10 @@ export function resolveDiscordGatewayIntents(
   return intents;
 }
 
-export async function createDiscordGatewayPlugin(params: {
+export function createDiscordGatewayPlugin(params: {
   discordConfig: DiscordAccountConfig;
   runtime: RuntimeEnv;
-}): Promise<GatewayPlugin> {
+}): GatewayPlugin {
   const intents = resolveDiscordGatewayIntents(params.discordConfig?.intents);
   const proxy = params.discordConfig?.proxy?.trim();
   const options = {
@@ -42,8 +44,8 @@ export async function createDiscordGatewayPlugin(params: {
   }
 
   try {
-    const { HttpsProxyAgent } = await import("https-proxy-agent");
-    const agent = new HttpsProxyAgent<string>(proxy);
+    const wsAgent = new HttpsProxyAgent<string>(proxy);
+    const fetchAgent = new ProxyAgent(proxy);
 
     params.runtime.log?.("discord: gateway proxy enabled");
 
@@ -52,8 +54,28 @@ export async function createDiscordGatewayPlugin(params: {
         super(options);
       }
 
-      createWebSocket(url: string) {
-        return new WebSocket(url, { agent });
+      override async registerClient(client: Parameters<GatewayPlugin["registerClient"]>[0]) {
+        if (!this.gatewayInfo) {
+          try {
+            const response = await undiciFetch("https://discord.com/api/v10/gateway/bot", {
+              headers: {
+                Authorization: `Bot ${client.options.token}`,
+              },
+              dispatcher: fetchAgent,
+            } as Record<string, unknown>);
+            this.gatewayInfo = (await response.json()) as APIGatewayBotInfo;
+          } catch (error) {
+            throw new Error(
+              `Failed to get gateway information from Discord: ${error instanceof Error ? error.message : String(error)}`,
+              { cause: error },
+            );
+          }
+        }
+        return super.registerClient(client);
+      }
+
+      override createWebSocket(url: string) {
+        return new WebSocket(url, { agent: wsAgent });
       }
     }
 

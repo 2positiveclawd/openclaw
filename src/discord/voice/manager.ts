@@ -1,25 +1,27 @@
-import type { VoicePlugin } from "@buape/carbon/voice";
-import type { AudioPlayer, VoiceConnection } from "@discordjs/voice";
-import type { Readable } from "node:stream";
-import { ChannelType, type Client, ReadyListener } from "@buape/carbon";
-
-let _voiceModule: typeof import("@discordjs/voice") | null = null;
-async function getVoiceModule() {
-  if (!_voiceModule) {
-    _voiceModule = await import("@discordjs/voice");
-  }
-  return _voiceModule;
-}
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import { createRequire } from "node:module";
 import path from "node:path";
-import type { MsgContext } from "../../auto-reply/templating.js";
-import type { OpenClawConfig } from "../../config/config.js";
-import type { DiscordAccountConfig, TtsConfig } from "../../config/types.js";
-import type { RuntimeEnv } from "../../runtime.js";
+import type { Readable } from "node:stream";
+import { ChannelType, type Client, ReadyListener } from "@buape/carbon";
+import type { VoicePlugin } from "@buape/carbon/voice";
+import {
+  AudioPlayerStatus,
+  EndBehaviorType,
+  VoiceConnectionStatus,
+  createAudioPlayer,
+  createAudioResource,
+  entersState,
+  joinVoiceChannel,
+  type AudioPlayer,
+  type VoiceConnection,
+} from "@discordjs/voice";
 import { resolveAgentDir } from "../../agents/agent-scope.js";
-import { agentCommand } from "../../commands/agent.js";
+import type { MsgContext } from "../../auto-reply/templating.js";
+import { agentCommandFromIngress } from "../../commands/agent.js";
+import type { OpenClawConfig } from "../../config/config.js";
+import { isDangerousNameMatchingEnabled } from "../../config/dangerous-name-matching.js";
+import type { DiscordAccountConfig, TtsConfig } from "../../config/types.js";
 import { logVerbose, shouldLogVerbose } from "../../globals.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { resolvePreferredOpenClawTmpDir } from "../../infra/tmp-openclaw-dir.js";
@@ -31,17 +33,14 @@ import {
   runCapability,
 } from "../../media-understanding/runner.js";
 import { resolveAgentRoute } from "../../routing/resolve-route.js";
+import type { RuntimeEnv } from "../../runtime.js";
 import { parseTtsDirectives } from "../../tts/tts-core.js";
 import { resolveTtsConfig, textToSpeech, type ResolvedTtsConfig } from "../../tts/tts.js";
+import { formatMention } from "../mentions.js";
+import { resolveDiscordOwnerAccess } from "../monitor/allow-list.js";
+import { formatDiscordUserTag } from "../monitor/format.js";
 
 const require = createRequire(import.meta.url);
-let _OpusScript: typeof import("opusscript") | null = null;
-function getOpusScript() {
-  if (!_OpusScript) {
-    _OpusScript = require("opusscript") as typeof import("opusscript");
-  }
-  return _OpusScript;
-}
 
 const SAMPLE_RATE = 48_000;
 const CHANNELS = 2;
@@ -50,6 +49,10 @@ const MIN_SEGMENT_SECONDS = 0.35;
 const SILENCE_DURATION_MS = 1_000;
 const PLAYBACK_READY_TIMEOUT_MS = 15_000;
 const SPEAKING_READY_TIMEOUT_MS = 60_000;
+const DECRYPT_FAILURE_WINDOW_MS = 30_000;
+const DECRYPT_FAILURE_RECONNECT_THRESHOLD = 3;
+const DECRYPT_FAILURE_PATTERN = /DecryptionFailed\(/;
+const SPEAKER_CONTEXT_CACHE_TTL_MS = 60_000;
 
 const logger = createSubsystemLogger("discord/voice");
 
@@ -74,6 +77,9 @@ type VoiceSessionEntry = {
   playbackQueue: Promise<void>;
   processingQueue: Promise<void>;
   activeSpeakers: Set<string>;
+  decryptFailureCount: number;
+  lastDecryptFailureAt: number;
+  decryptRecoveryInFlight: boolean;
   stop: () => void;
 };
 
@@ -151,20 +157,23 @@ type OpusDecoder = {
   decode: (buffer: Buffer) => Buffer;
 };
 
+let warnedOpusMissing = false;
+
 function createOpusDecoder(): { decoder: OpusDecoder; name: string } | null {
   try {
-    const OpusScript = getOpusScript();
+    const OpusScript = require("opusscript") as {
+      new (sampleRate: number, channels: number, application: number): OpusDecoder;
+      Application: { AUDIO: number };
+    };
     const decoder = new OpusScript(SAMPLE_RATE, CHANNELS, OpusScript.Application.AUDIO);
     return { decoder, name: "opusscript" };
   } catch (err) {
-    logger.warn(`discord voice: opusscript init failed: ${formatErrorMessage(err)}`);
-  }
-  try {
-    const { OpusEncoder } = require("@discordjs/opus") as typeof import("@discordjs/opus");
-    const decoder = new OpusEncoder(SAMPLE_RATE, CHANNELS);
-    return { decoder, name: "@discordjs/opus" };
-  } catch (err) {
-    logger.warn(`discord voice: opus decoder init failed: ${formatErrorMessage(err)}`);
+    if (!warnedOpusMissing) {
+      warnedOpusMissing = true;
+      logger.warn(
+        `discord voice: opusscript unavailable (${formatErrorMessage(err)}); cannot decode voice audio`,
+      );
+    }
   }
   return null;
 }
@@ -261,6 +270,16 @@ export class DiscordVoiceManager {
   private botUserId?: string;
   private readonly voiceEnabled: boolean;
   private autoJoinTask: Promise<void> | null = null;
+  private readonly ownerAllowFrom: string[];
+  private readonly allowDangerousNameMatching: boolean;
+  private readonly speakerContextCache = new Map<
+    string,
+    {
+      label: string;
+      senderIsOwner: boolean;
+      expiresAt: number;
+    }
+  >();
 
   constructor(
     private params: {
@@ -274,6 +293,9 @@ export class DiscordVoiceManager {
   ) {
     this.botUserId = params.botUserId;
     this.voiceEnabled = params.discordConfig.voice?.enabled !== false;
+    this.ownerAllowFrom =
+      params.discordConfig.allowFrom ?? params.discordConfig.dm?.allowFrom ?? [];
+    this.allowDangerousNameMatching = isDangerousNameMatchingEnabled(params.discordConfig);
   }
 
   setBotUserId(id?: string) {
@@ -347,7 +369,12 @@ export class DiscordVoiceManager {
     const existing = this.sessions.get(guildId);
     if (existing && existing.channelId === channelId) {
       logVoiceVerbose(`join: already connected to guild ${guildId} channel ${channelId}`);
-      return { ok: true, message: `Already connected to <#${channelId}>.`, guildId, channelId };
+      return {
+        ok: true,
+        message: `Already connected to ${formatMention({ channelId })}.`,
+        guildId,
+        channelId,
+      };
     }
     if (existing) {
       logVoiceVerbose(`join: replacing existing session for guild ${guildId}`);
@@ -368,22 +395,26 @@ export class DiscordVoiceManager {
       return { ok: false, message: "Discord voice plugin is not available." };
     }
 
-    const voice = await getVoiceModule();
     const adapterCreator = voicePlugin.getGatewayAdapterCreator(guildId);
-    const connection = voice.joinVoiceChannel({
+    const daveEncryption = this.params.discordConfig.voice?.daveEncryption;
+    const decryptionFailureTolerance = this.params.discordConfig.voice?.decryptionFailureTolerance;
+    logVoiceVerbose(
+      `join: DAVE settings encryption=${daveEncryption === false ? "off" : "on"} tolerance=${
+        decryptionFailureTolerance ?? "default"
+      }`,
+    );
+    const connection = joinVoiceChannel({
       channelId,
       guildId,
       adapterCreator,
       selfDeaf: false,
       selfMute: false,
+      daveEncryption,
+      decryptionFailureTolerance,
     });
 
     try {
-      await voice.entersState(
-        connection,
-        voice.VoiceConnectionStatus.Ready,
-        PLAYBACK_READY_TIMEOUT_MS,
-      );
+      await entersState(connection, VoiceConnectionStatus.Ready, PLAYBACK_READY_TIMEOUT_MS);
       logVoiceVerbose(`join: connected to guild ${guildId} channel ${channelId}`);
     } catch (err) {
       connection.destroy();
@@ -406,8 +437,19 @@ export class DiscordVoiceManager {
       peer: { kind: "channel", id: sessionChannelId },
     });
 
-    const player = voice.createAudioPlayer();
+    const player = createAudioPlayer();
     connection.subscribe(player);
+
+    let speakingHandler: ((userId: string) => void) | undefined;
+    let disconnectedHandler: (() => Promise<void>) | undefined;
+    let destroyedHandler: (() => void) | undefined;
+    let playerErrorHandler: ((err: Error) => void) | undefined;
+    const clearSessionIfCurrent = () => {
+      const active = this.sessions.get(guildId);
+      if (active?.connection === connection) {
+        this.sessions.delete(guildId);
+      }
+    };
 
     const entry: VoiceSessionEntry = {
       guildId,
@@ -419,42 +461,60 @@ export class DiscordVoiceManager {
       playbackQueue: Promise.resolve(),
       processingQueue: Promise.resolve(),
       activeSpeakers: new Set(),
+      decryptFailureCount: 0,
+      lastDecryptFailureAt: 0,
+      decryptRecoveryInFlight: false,
       stop: () => {
+        if (speakingHandler) {
+          connection.receiver.speaking.off("start", speakingHandler);
+        }
+        if (disconnectedHandler) {
+          connection.off(VoiceConnectionStatus.Disconnected, disconnectedHandler);
+        }
+        if (destroyedHandler) {
+          connection.off(VoiceConnectionStatus.Destroyed, destroyedHandler);
+        }
+        if (playerErrorHandler) {
+          player.off("error", playerErrorHandler);
+        }
         player.stop();
         connection.destroy();
       },
     };
 
-    const speakingHandler = (userId: string) => {
+    speakingHandler = (userId: string) => {
       void this.handleSpeakingStart(entry, userId).catch((err) => {
         logger.warn(`discord voice: capture failed: ${formatErrorMessage(err)}`);
       });
     };
 
-    connection.receiver.speaking.on("start", speakingHandler);
-    connection.on(voice.VoiceConnectionStatus.Disconnected, async () => {
+    disconnectedHandler = async () => {
       try {
         await Promise.race([
-          voice.entersState(connection, voice.VoiceConnectionStatus.Signalling, 5_000),
-          voice.entersState(connection, voice.VoiceConnectionStatus.Connecting, 5_000),
+          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
         ]);
       } catch {
-        this.sessions.delete(guildId);
+        clearSessionIfCurrent();
         connection.destroy();
       }
-    });
-    connection.on(voice.VoiceConnectionStatus.Destroyed, () => {
-      this.sessions.delete(guildId);
-    });
-
-    player.on("error", (err: Error) => {
+    };
+    destroyedHandler = () => {
+      clearSessionIfCurrent();
+    };
+    playerErrorHandler = (err: Error) => {
       logger.warn(`discord voice: playback error: ${formatErrorMessage(err)}`);
-    });
+    };
+
+    connection.receiver.speaking.on("start", speakingHandler);
+    connection.on(VoiceConnectionStatus.Disconnected, disconnectedHandler);
+    connection.on(VoiceConnectionStatus.Destroyed, destroyedHandler);
+    player.on("error", playerErrorHandler);
 
     this.sessions.set(guildId, entry);
     return {
       ok: true,
-      message: `Joined <#${channelId}>.`,
+      message: `Joined ${formatMention({ channelId })}.`,
       guildId,
       channelId,
     };
@@ -475,7 +535,7 @@ export class DiscordVoiceManager {
     logVoiceVerbose(`leave: disconnected from guild ${guildId} channel ${entry.channelId}`);
     return {
       ok: true,
-      message: `Left <#${entry.channelId}>.`,
+      message: `Left ${formatMention({ channelId: entry.channelId })}.`,
       guildId,
       channelId: entry.channelId,
     };
@@ -508,23 +568,22 @@ export class DiscordVoiceManager {
       return;
     }
 
-    const voice = await getVoiceModule();
     entry.activeSpeakers.add(userId);
     logVoiceVerbose(
       `capture start: guild ${entry.guildId} channel ${entry.channelId} user ${userId}`,
     );
-    if (entry.player.state.status === voice.AudioPlayerStatus.Playing) {
+    if (entry.player.state.status === AudioPlayerStatus.Playing) {
       entry.player.stop(true);
     }
 
     const stream = entry.connection.receiver.subscribe(userId, {
       end: {
-        behavior: voice.EndBehaviorType.AfterSilence,
+        behavior: EndBehaviorType.AfterSilence,
         duration: SILENCE_DURATION_MS,
       },
     });
-    stream.on("error", (err: Error) => {
-      logger.warn(`discord voice: receive error: ${formatErrorMessage(err)}`);
+    stream.on("error", (err) => {
+      this.handleReceiveError(entry, err);
     });
 
     try {
@@ -535,6 +594,7 @@ export class DiscordVoiceManager {
         );
         return;
       }
+      this.resetDecryptFailureState(entry);
       const { path: wavPath, durationSeconds } = await writeWavFile(pcm);
       if (durationSeconds < MIN_SEGMENT_SECONDS) {
         logVoiceVerbose(
@@ -578,15 +638,16 @@ export class DiscordVoiceManager {
       `transcription ok (${transcript.length} chars): guild ${entry.guildId} channel ${entry.channelId}`,
     );
 
-    const speakerLabel = await this.resolveSpeakerLabel(entry.guildId, userId);
-    const prompt = speakerLabel ? `${speakerLabel}: ${transcript}` : transcript;
+    const speaker = await this.resolveSpeakerContext(entry.guildId, userId);
+    const prompt = speaker.label ? `${speaker.label}: ${transcript}` : transcript;
 
-    const result = await agentCommand(
+    const result = await agentCommandFromIngress(
       {
         message: prompt,
         sessionKey: entry.route.sessionKey,
         agentId: entry.route.agentId,
         messageChannel: "discord",
+        senderIsOwner: speaker.senderIsOwner,
         deliver: false,
       },
       this.params.runtime,
@@ -640,29 +701,183 @@ export class DiscordVoiceManager {
       logVoiceVerbose(
         `playback start: guild ${entry.guildId} channel ${entry.channelId} file ${path.basename(audioPath)}`,
       );
-      const voice = await getVoiceModule();
-      const resource = voice.createAudioResource(audioPath);
+      const resource = createAudioResource(audioPath);
       entry.player.play(resource);
-      await voice
-        .entersState(entry.player, voice.AudioPlayerStatus.Playing, PLAYBACK_READY_TIMEOUT_MS)
-        .catch(() => undefined);
-      await voice
-        .entersState(entry.player, voice.AudioPlayerStatus.Idle, SPEAKING_READY_TIMEOUT_MS)
-        .catch(() => undefined);
+      await entersState(entry.player, AudioPlayerStatus.Playing, PLAYBACK_READY_TIMEOUT_MS).catch(
+        () => undefined,
+      );
+      await entersState(entry.player, AudioPlayerStatus.Idle, SPEAKING_READY_TIMEOUT_MS).catch(
+        () => undefined,
+      );
       logVoiceVerbose(`playback done: guild ${entry.guildId} channel ${entry.channelId}`);
     });
   }
 
-  private async resolveSpeakerLabel(guildId: string, userId: string): Promise<string | undefined> {
+  private handleReceiveError(entry: VoiceSessionEntry, err: unknown) {
+    const message = formatErrorMessage(err);
+    logger.warn(`discord voice: receive error: ${message}`);
+    if (!DECRYPT_FAILURE_PATTERN.test(message)) {
+      return;
+    }
+    const now = Date.now();
+    if (now - entry.lastDecryptFailureAt > DECRYPT_FAILURE_WINDOW_MS) {
+      entry.decryptFailureCount = 0;
+    }
+    entry.lastDecryptFailureAt = now;
+    entry.decryptFailureCount += 1;
+    if (entry.decryptFailureCount === 1) {
+      logger.warn(
+        "discord voice: DAVE decrypt failures detected; voice receive may be unstable (upstream: discordjs/discord.js#11419)",
+      );
+    }
+    if (
+      entry.decryptFailureCount < DECRYPT_FAILURE_RECONNECT_THRESHOLD ||
+      entry.decryptRecoveryInFlight
+    ) {
+      return;
+    }
+    entry.decryptRecoveryInFlight = true;
+    this.resetDecryptFailureState(entry);
+    void this.recoverFromDecryptFailures(entry)
+      .catch((recoverErr) =>
+        logger.warn(`discord voice: decrypt recovery failed: ${formatErrorMessage(recoverErr)}`),
+      )
+      .finally(() => {
+        entry.decryptRecoveryInFlight = false;
+      });
+  }
+
+  private resetDecryptFailureState(entry: VoiceSessionEntry) {
+    entry.decryptFailureCount = 0;
+    entry.lastDecryptFailureAt = 0;
+  }
+
+  private async recoverFromDecryptFailures(entry: VoiceSessionEntry) {
+    const active = this.sessions.get(entry.guildId);
+    if (!active || active.connection !== entry.connection) {
+      return;
+    }
+    logger.warn(
+      `discord voice: repeated decrypt failures; attempting rejoin for guild ${entry.guildId} channel ${entry.channelId}`,
+    );
+    const leaveResult = await this.leave({ guildId: entry.guildId });
+    if (!leaveResult.ok) {
+      logger.warn(`discord voice: decrypt recovery leave failed: ${leaveResult.message}`);
+      return;
+    }
+    const result = await this.join({ guildId: entry.guildId, channelId: entry.channelId });
+    if (!result.ok) {
+      logger.warn(`discord voice: rejoin after decrypt failures failed: ${result.message}`);
+    }
+  }
+
+  private resolveSpeakerIsOwner(params: { id: string; name?: string; tag?: string }): boolean {
+    return resolveDiscordOwnerAccess({
+      allowFrom: this.ownerAllowFrom,
+      sender: {
+        id: params.id,
+        name: params.name,
+        tag: params.tag,
+      },
+      allowNameMatching: this.allowDangerousNameMatching,
+    }).ownerAllowed;
+  }
+
+  private resolveSpeakerContextCacheKey(guildId: string, userId: string): string {
+    return `${guildId}:${userId}`;
+  }
+
+  private getCachedSpeakerContext(
+    guildId: string,
+    userId: string,
+  ):
+    | {
+        label: string;
+        senderIsOwner: boolean;
+      }
+    | undefined {
+    const key = this.resolveSpeakerContextCacheKey(guildId, userId);
+    const cached = this.speakerContextCache.get(key);
+    if (!cached) {
+      return undefined;
+    }
+    if (cached.expiresAt <= Date.now()) {
+      this.speakerContextCache.delete(key);
+      return undefined;
+    }
+    return {
+      label: cached.label,
+      senderIsOwner: cached.senderIsOwner,
+    };
+  }
+
+  private setCachedSpeakerContext(
+    guildId: string,
+    userId: string,
+    context: { label: string; senderIsOwner: boolean },
+  ): void {
+    const key = this.resolveSpeakerContextCacheKey(guildId, userId);
+    this.speakerContextCache.set(key, {
+      label: context.label,
+      senderIsOwner: context.senderIsOwner,
+      expiresAt: Date.now() + SPEAKER_CONTEXT_CACHE_TTL_MS,
+    });
+  }
+
+  private async resolveSpeakerContext(
+    guildId: string,
+    userId: string,
+  ): Promise<{
+    label: string;
+    senderIsOwner: boolean;
+  }> {
+    const cached = this.getCachedSpeakerContext(guildId, userId);
+    if (cached) {
+      return cached;
+    }
+    const identity = await this.resolveSpeakerIdentity(guildId, userId);
+    const context = {
+      label: identity.label,
+      senderIsOwner: this.resolveSpeakerIsOwner({
+        id: identity.id,
+        name: identity.name,
+        tag: identity.tag,
+      }),
+    };
+    this.setCachedSpeakerContext(guildId, userId, context);
+    return context;
+  }
+
+  private async resolveSpeakerIdentity(
+    guildId: string,
+    userId: string,
+  ): Promise<{
+    id: string;
+    label: string;
+    name?: string;
+    tag?: string;
+  }> {
     try {
       const member = await this.params.client.fetchMember(guildId, userId);
-      return member.nickname ?? member.user?.globalName ?? member.user?.username ?? userId;
+      const username = member.user?.username ?? undefined;
+      return {
+        id: userId,
+        label: member.nickname ?? member.user?.globalName ?? username ?? userId,
+        name: username,
+        tag: member.user ? formatDiscordUserTag(member.user) : undefined,
+      };
     } catch {
       try {
         const user = await this.params.client.fetchUser(userId);
-        return user.globalName ?? user.username ?? userId;
+        const username = user.username ?? undefined;
+        return {
+          id: userId,
+          label: user.globalName ?? username ?? userId,
+          name: username,
+          tag: formatDiscordUserTag(user),
+        };
       } catch {
-        return userId;
+        return { id: userId, label: userId };
       }
     }
   }

@@ -29,8 +29,8 @@ import {
 } from "./infra/ports.js";
 import { assertSupportedRuntime } from "./infra/runtime-guard.js";
 import {
-  installUnhandledRejectionHandler,
   isRecoverableException,
+  installUnhandledRejectionHandler,
 } from "./infra/unhandled-rejections.js";
 import { enableConsoleCapture } from "./logging.js";
 import { runCommandWithTimeout, runExec } from "./process/exec.js";

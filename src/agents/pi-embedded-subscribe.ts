@@ -1,15 +1,10 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { InlineCodeState } from "../markdown/code-spans.js";
-import type {
-  EmbeddedPiSubscribeContext,
-  EmbeddedPiSubscribeState,
-} from "./pi-embedded-subscribe.handlers.types.js";
-import type { SubscribeEmbeddedPiSessionParams } from "./pi-embedded-subscribe.types.js";
 import { parseReplyDirectives } from "../auto-reply/reply/reply-directives.js";
 import { createStreamingDirectiveAccumulator } from "../auto-reply/reply/streaming-directives.js";
 import { formatToolAggregate } from "../auto-reply/tool-meta.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import type { InlineCodeState } from "../markdown/code-spans.js";
 import { buildCodeSpanIndex, createInlineCodeState } from "../markdown/code-spans.js";
 import { EmbeddedBlockChunker } from "./pi-embedded-block-chunker.js";
 import {
@@ -17,7 +12,12 @@ import {
   normalizeTextForComparison,
 } from "./pi-embedded-helpers.js";
 import { createEmbeddedPiSessionEventHandler } from "./pi-embedded-subscribe.handlers.js";
+import type {
+  EmbeddedPiSubscribeContext,
+  EmbeddedPiSubscribeState,
+} from "./pi-embedded-subscribe.handlers.types.js";
 import { filterToolResultMediaUrls } from "./pi-embedded-subscribe.tools.js";
+import type { SubscribeEmbeddedPiSessionParams } from "./pi-embedded-subscribe.types.js";
 import { formatReasoningMessage, stripDowngradedToolCallText } from "./pi-embedded-utils.js";
 import { hasNonzeroUsage, normalizeUsage, type UsageLike } from "./usage.js";
 
@@ -317,35 +317,10 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     }
     return `\`\`\`txt\n${trimmed}\n\`\`\``;
   };
-  const emitToolSummary = (toolName?: string, meta?: string) => {
+  const emitToolResultMessage = (toolName: string | undefined, message: string) => {
     if (!params.onToolResult) {
       return;
     }
-    const agg = formatToolAggregate(toolName, meta ? [meta] : undefined, {
-      markdown: useMarkdown,
-    });
-    const { text: cleanedText, mediaUrls } = parseReplyDirectives(agg);
-    const filteredMediaUrls = filterToolResultMediaUrls(toolName, mediaUrls ?? []);
-    if (!cleanedText && filteredMediaUrls.length === 0) {
-      return;
-    }
-    try {
-      void params.onToolResult({
-        text: cleanedText,
-        mediaUrls: filteredMediaUrls.length ? filteredMediaUrls : undefined,
-      });
-    } catch {
-      // ignore tool result delivery failures
-    }
-  };
-  const emitToolOutput = (toolName?: string, meta?: string, output?: string) => {
-    if (!params.onToolResult || !output) {
-      return;
-    }
-    const agg = formatToolAggregate(toolName, meta ? [meta] : undefined, {
-      markdown: useMarkdown,
-    });
-    const message = `${agg}\n${formatToolOutputBlock(output)}`;
     const { text: cleanedText, mediaUrls } = parseReplyDirectives(message);
     const filteredMediaUrls = filterToolResultMediaUrls(toolName, mediaUrls ?? []);
     if (!cleanedText && filteredMediaUrls.length === 0) {
@@ -359,6 +334,22 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     } catch {
       // ignore tool result delivery failures
     }
+  };
+  const emitToolSummary = (toolName?: string, meta?: string) => {
+    const agg = formatToolAggregate(toolName, meta ? [meta] : undefined, {
+      markdown: useMarkdown,
+    });
+    emitToolResultMessage(toolName, agg);
+  };
+  const emitToolOutput = (toolName?: string, meta?: string, output?: string) => {
+    if (!output) {
+      return;
+    }
+    const agg = formatToolAggregate(toolName, meta ? [meta] : undefined, {
+      markdown: useMarkdown,
+    });
+    const message = `${agg}\n${formatToolOutputBlock(output)}`;
+    emitToolResultMessage(toolName, message);
   };
 
   const stripBlockTags = (
