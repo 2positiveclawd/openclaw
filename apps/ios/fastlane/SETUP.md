@@ -32,9 +32,9 @@ ASC_KEYCHAIN_ACCOUNT=YOUR_MAC_USERNAME
 Optional app targeting variables (helpful if Fastlane cannot auto-resolve app by bundle):
 
 ```bash
-ASC_APP_IDENTIFIER=ai.openclaw.ios
+ASC_APP_IDENTIFIER=ai.openclaw.client
 # or
-ASC_APP_ID=6760218713
+ASC_APP_ID=YOUR_APP_STORE_CONNECT_APP_ID
 ```
 
 File-based fallback (CI/non-macOS):
@@ -60,9 +60,74 @@ cd apps/ios
 fastlane ios auth_check
 ```
 
-Run:
+ASC auth is only required when:
+
+- uploading to TestFlight
+- auto-resolving the next build number from App Store Connect
+
+If you pass `--build-number` to `pnpm ios:beta:archive`, the local archive path does not need ASC auth.
+
+Archive locally without upload:
+
+```bash
+pnpm ios:beta:archive
+```
+
+Upload to TestFlight:
+
+```bash
+pnpm ios:beta
+```
+
+Direct Fastlane entry point:
 
 ```bash
 cd apps/ios
-fastlane beta
+fastlane ios beta
 ```
+
+Maintainer recovery path for a fresh clone on the same Mac:
+
+1. Reuse the existing Keychain-backed ASC key on that machine.
+2. Restore or recreate `apps/ios/fastlane/.env` so it contains the non-secret variables:
+
+```bash
+ASC_KEY_ID=YOUR_KEY_ID
+ASC_ISSUER_ID=YOUR_ISSUER_ID
+ASC_KEYCHAIN_SERVICE=openclaw-asc-key
+ASC_KEYCHAIN_ACCOUNT=YOUR_MAC_USERNAME
+```
+
+3. Re-run auth validation:
+
+```bash
+cd apps/ios
+fastlane ios auth_check
+```
+
+4. Set the official/TestFlight relay URL before release:
+
+```bash
+export OPENCLAW_PUSH_RELAY_BASE_URL=https://relay.example.com
+```
+
+5. Upload:
+
+```bash
+pnpm ios:beta
+```
+
+Quick verification after upload:
+
+- confirm `apps/ios/build/beta/OpenClaw-<version>.ipa` exists
+- confirm Fastlane prints `Uploaded iOS beta: version=<version> short=<short> build=<build>`
+- remember that TestFlight processing can take a few minutes after the upload succeeds
+
+Versioning rules:
+
+- Root `package.json.version` is the single source of truth for iOS
+- Use `YYYY.M.D` for stable versions and `YYYY.M.D-beta.N` for beta versions
+- Fastlane stamps `CFBundleShortVersionString` to `YYYY.M.D`
+- Fastlane resolves `CFBundleVersion` as the next integer TestFlight build number for that short version
+- The beta flow regenerates `apps/ios/OpenClaw.xcodeproj` from `apps/ios/project.yml` before archiving
+- Local beta signing uses a temporary generated xcconfig and leaves local development signing overrides untouched

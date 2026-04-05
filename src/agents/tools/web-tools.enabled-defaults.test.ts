@@ -1,5 +1,8 @@
 import { EnvHttpProxyAgent } from "undici";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createEmptyPluginRegistry } from "../../plugins/registry.js";
+import { setActivePluginRegistry } from "../../plugins/runtime.js";
+import { clearSecretsRuntimeSnapshot } from "../../secrets/runtime.js";
 import { withFetchPreconnect } from "../../test-utils/fetch-mock.js";
 import { __testing as webSearchTesting } from "./web-search.js";
 import { createWebFetchTool, createWebSearchTool } from "./web-tools.js";
@@ -113,11 +116,13 @@ function installPerplexitySearchApiFetch(results?: Array<Record<string, unknown>
   });
 }
 
-function installPerplexityChatFetch() {
-  return installMockFetch({
-    choices: [{ message: { content: "ok" } }],
-    citations: ["https://example.com"],
-  });
+function installPerplexityChatFetch(payload?: Record<string, unknown>) {
+  return installMockFetch(
+    payload ?? {
+      choices: [{ message: { content: "ok" } }],
+      citations: ["https://example.com"],
+    },
+  );
 }
 
 function createProviderSuccessPayload(
@@ -148,6 +153,16 @@ function createProviderSuccessPayload(
   };
 }
 
+beforeEach(() => {
+  setActivePluginRegistry(createEmptyPluginRegistry());
+  clearSecretsRuntimeSnapshot();
+});
+
+afterEach(() => {
+  setActivePluginRegistry(createEmptyPluginRegistry());
+  clearSecretsRuntimeSnapshot();
+});
+
 describe("web tools defaults", () => {
   it("enables web_fetch by default (non-sandbox)", () => {
     const tool = createWebFetchTool({ config: {}, sandboxed: false });
@@ -165,6 +180,79 @@ describe("web tools defaults", () => {
   it("enables web_search by default", () => {
     const tool = createWebSearchTool({ config: {}, sandboxed: false });
     expect(tool?.name).toBe("web_search");
+  });
+
+  it("prefers runtime-selected web_search provider over local provider config", async () => {
+    const mockFetch = installMockFetch(createProviderSuccessPayload("gemini"));
+    const tool = createWebSearchTool({
+      config: {
+        tools: {
+          web: {
+            search: {
+              provider: "brave",
+              apiKey: "brave-config-test", // pragma: allowlist secret
+              gemini: {
+                apiKey: "gemini-config-test", // pragma: allowlist secret
+              },
+            },
+          },
+        },
+      },
+      sandboxed: true,
+      runtimeWebSearch: {
+        providerConfigured: "brave",
+        providerSource: "auto-detect",
+        selectedProvider: "gemini",
+        selectedProviderKeySource: "secretRef",
+        diagnostics: [],
+      },
+    });
+
+    const result = await tool?.execute?.("call-runtime-provider", { query: "runtime override" });
+
+    expect(mockFetch).toHaveBeenCalled();
+    expect(String(mockFetch.mock.calls[0]?.[0])).toContain("generativelanguage.googleapis.com");
+    expect((result?.details as { provider?: string } | undefined)?.provider).toBe("gemini");
+  });
+
+  it("uses runtime-only web_search providers when runtime metadata is present", () => {
+    const registry = createEmptyPluginRegistry();
+    registry.webSearchProviders.push({
+      pluginId: "custom-search",
+      pluginName: "Custom Search",
+      source: "test",
+      provider: {
+        id: "custom",
+        label: "Custom Search",
+        hint: "Custom runtime provider",
+        envVars: ["CUSTOM_SEARCH_API_KEY"],
+        placeholder: "custom-...",
+        signupUrl: "https://example.com/signup",
+        autoDetectOrder: 1,
+        credentialPath: "tools.web.search.custom.apiKey",
+        getCredentialValue: () => "configured",
+        setCredentialValue: () => {},
+        createTool: () => ({
+          description: "custom runtime tool",
+          parameters: {},
+          execute: async () => ({ ok: true }),
+        }),
+      },
+    });
+    setActivePluginRegistry(registry);
+
+    const tool = createWebSearchTool({
+      sandboxed: true,
+      runtimeWebSearch: {
+        providerConfigured: "custom",
+        providerSource: "configured",
+        selectedProvider: "custom",
+        selectedProviderKeySource: "config",
+        diagnostics: [],
+      },
+    });
+
+    expect(tool?.description).toBe("custom runtime tool");
   });
 });
 
@@ -290,9 +378,16 @@ describe("web_search provider proxy dispatch", () => {
 
 describe("web_search perplexity Search API", () => {
   const priorFetch = global.fetch;
+  const savedEnv = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.PERPLEXITY_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    process.env = { ...savedEnv };
     global.fetch = priorFetch;
     webSearchTesting.SEARCH_CACHE.clear();
   });
@@ -301,13 +396,13 @@ describe("web_search perplexity Search API", () => {
     vi.stubEnv("PERPLEXITY_API_KEY", "pplx-test");
     const mockFetch = installPerplexitySearchApiFetch();
     const tool = createPerplexitySearchTool();
-    const result = await tool?.execute?.("call-1", { query: "test" });
+    const result = await tool?.execute?.("call-1", { query: "annotations-test" });
 
     expect(mockFetch).toHaveBeenCalled();
     expect(mockFetch.mock.calls[0]?.[0]).toBe("https://api.perplexity.ai/search");
     expect((mockFetch.mock.calls[0]?.[1] as RequestInit | undefined)?.method).toBe("POST");
     const body = parseFirstRequestBody(mockFetch);
-    expect(body.query).toBe("test");
+    expect(body.query).toBe("annotations-test");
     expect(result?.details).toMatchObject({
       provider: "perplexity",
       externalContent: { untrusted: true, source: "web_search", wrapped: true },
@@ -335,7 +430,7 @@ describe("web_search perplexity Search API", () => {
   it("uses config API key when provided", async () => {
     const mockFetch = installPerplexitySearchApiFetch([]);
     const tool = createPerplexitySearchTool({ apiKey: "pplx-config" });
-    await tool?.execute?.("call-1", { query: "test" });
+    await tool?.execute?.("call-1", { query: "config-api-key-test" });
 
     expect(mockFetch).toHaveBeenCalled();
     const headers = (mockFetch.mock.calls[0]?.[1] as RequestInit | undefined)?.headers as
@@ -427,9 +522,16 @@ describe("web_search perplexity Search API", () => {
 
 describe("web_search perplexity OpenRouter compatibility", () => {
   const priorFetch = global.fetch;
+  const savedEnv = { ...process.env };
+
+  beforeEach(() => {
+    delete process.env.PERPLEXITY_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
+  });
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    process.env = { ...savedEnv };
     global.fetch = priorFetch;
     webSearchTesting.SEARCH_CACHE.clear();
   });
@@ -439,7 +541,7 @@ describe("web_search perplexity OpenRouter compatibility", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-v1-test"); // pragma: allowlist secret
     const mockFetch = installPerplexityChatFetch();
     const tool = createPerplexitySearchTool();
-    const result = await tool?.execute?.("call-1", { query: "test" });
+    const result = await tool?.execute?.("call-1", { query: "annotations-test" });
 
     expect(mockFetch).toHaveBeenCalled();
     expect(mockFetch.mock.calls[0]?.[0]).toBe("https://openrouter.ai/api/v1/chat/completions");
@@ -455,7 +557,7 @@ describe("web_search perplexity OpenRouter compatibility", () => {
   it("routes configured sk-or key through chat completions", async () => {
     const mockFetch = installPerplexityChatFetch();
     const tool = createPerplexitySearchTool({ apiKey: "sk-or-v1-test" }); // pragma: allowlist secret
-    await tool?.execute?.("call-1", { query: "test" });
+    await tool?.execute?.("call-1", { query: "configured-openrouter-key-test" });
 
     expect(mockFetch).toHaveBeenCalled();
     expect(mockFetch.mock.calls[0]?.[0]).toBe("https://openrouter.ai/api/v1/chat/completions");
@@ -476,6 +578,41 @@ describe("web_search perplexity OpenRouter compatibility", () => {
     expect(body.search_recency_filter).toBe("week");
   });
 
+  it("falls back to message annotations when top-level citations are missing", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "sk-or-v1-test"); // pragma: allowlist secret
+    installPerplexityChatFetch({
+      choices: [
+        {
+          message: {
+            content: "ok",
+            annotations: [
+              {
+                type: "url_citation",
+                url_citation: { url: "https://example.com/a" },
+              },
+              {
+                type: "url_citation",
+                url_citation: { url: "https://example.com/b" },
+              },
+              {
+                type: "url_citation",
+                url_citation: { url: "https://example.com/a" },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const tool = createPerplexitySearchTool();
+    const result = await tool?.execute?.("call-1", { query: "annotations-fallback-test" });
+
+    expect(result?.details).toMatchObject({
+      provider: "perplexity",
+      citations: ["https://example.com/a", "https://example.com/b"],
+      content: expect.stringContaining("ok"),
+    });
+  });
+
   it("fails loud for Search API-only filters on the compatibility path", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-v1-test"); // pragma: allowlist secret
     const mockFetch = installPerplexityChatFetch();
@@ -486,23 +623,61 @@ describe("web_search perplexity OpenRouter compatibility", () => {
     });
 
     expect(mockFetch).not.toHaveBeenCalled();
-    expect(result?.details).toMatchObject({ error: "unsupported_domain_filter" });
+    expect((result?.details as { error?: string } | undefined)?.error).toMatch(
+      /^unsupported_(domain_filter|structured_filter)$/,
+    );
   });
 
-  it("hides Search API-only schema params on the compatibility path", () => {
+  it("keeps Search API schema params visible before runtime auth routing", () => {
     vi.stubEnv("OPENROUTER_API_KEY", "sk-or-v1-test"); // pragma: allowlist secret
     const tool = createPerplexitySearchTool();
     const properties = (tool?.parameters as { properties?: Record<string, unknown> } | undefined)
       ?.properties;
 
     expect(properties?.freshness).toBeDefined();
-    expect(properties?.country).toBeUndefined();
-    expect(properties?.language).toBeUndefined();
-    expect(properties?.date_after).toBeUndefined();
-    expect(properties?.date_before).toBeUndefined();
-    expect(properties?.domain_filter).toBeUndefined();
-    expect(properties?.max_tokens).toBeUndefined();
-    expect(properties?.max_tokens_per_page).toBeUndefined();
+    expect(properties?.country).toBeDefined();
+    expect(properties?.language).toBeDefined();
+    expect(properties?.date_after).toBeDefined();
+    expect(properties?.date_before).toBeDefined();
+    expect(properties?.domain_filter).toBeDefined();
+    expect(properties?.max_tokens).toBeDefined();
+    expect(properties?.max_tokens_per_page).toBeDefined();
+    expect(
+      (
+        properties?.country as
+          | {
+              description?: string;
+            }
+          | undefined
+      )?.description,
+    ).toContain("Native Perplexity Search API only.");
+    expect(
+      (
+        properties?.language as
+          | {
+              description?: string;
+            }
+          | undefined
+      )?.description,
+    ).toContain("Native Perplexity Search API only.");
+    expect(
+      (
+        properties?.date_after as
+          | {
+              description?: string;
+            }
+          | undefined
+      )?.description,
+    ).toContain("Native Perplexity Search API only.");
+    expect(
+      (
+        properties?.date_before as
+          | {
+              description?: string;
+            }
+          | undefined
+      )?.description,
+    ).toContain("Native Perplexity Search API only.");
   });
 
   it("keeps structured schema params on the native Search API path", () => {
@@ -522,6 +697,61 @@ describe("web_search perplexity OpenRouter compatibility", () => {
   });
 });
 
+describe("web_search Perplexity lazy resolution", () => {
+  const priorFetch = global.fetch;
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    global.fetch = priorFetch;
+  });
+
+  it("does not read Perplexity credentials while creating non-Perplexity tools", () => {
+    const perplexityConfig: Record<string, unknown> = {};
+    Object.defineProperty(perplexityConfig, "apiKey", {
+      enumerable: true,
+      get() {
+        throw new Error("perplexity-apiKey-getter-called");
+      },
+    });
+
+    const tool = createWebSearchTool({
+      config: {
+        tools: {
+          web: {
+            search: {
+              provider: "gemini",
+              gemini: { apiKey: "gemini-config-test" }, // pragma: allowlist secret
+              perplexity: perplexityConfig as { apiKey?: string; baseUrl?: string; model?: string },
+            },
+          },
+        },
+      },
+      sandboxed: true,
+    });
+
+    expect(tool?.name).toBe("web_search");
+  });
+
+  it("defers Perplexity credential reads until execute", async () => {
+    const perplexityConfig: Record<string, unknown> = {};
+    Object.defineProperty(perplexityConfig, "apiKey", {
+      enumerable: true,
+      get() {
+        throw new Error("perplexity-apiKey-getter-called");
+      },
+    });
+
+    const tool = createPerplexitySearchTool(
+      perplexityConfig as { apiKey?: string; baseUrl?: string; model?: string },
+    );
+
+    expect(tool?.name).toBe("web_search");
+    await expect(tool?.execute?.("call-1", { query: "test" })).rejects.toThrow(
+      /perplexity-apiKey-getter-called/,
+    );
+  });
+});
+
 describe("web_search kimi provider", () => {
   const priorFetch = global.fetch;
 
@@ -538,7 +768,7 @@ describe("web_search kimi provider", () => {
     expect(result?.details).toMatchObject({ error: "missing_kimi_api_key" });
   });
 
-  it("runs the Kimi web_search tool flow and echoes tool results", async () => {
+  it("runs the Kimi web_search tool flow and echoes tool-call arguments", async () => {
     const mockFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => {
       const idx = mockFetch.mock.calls.length;
       if (idx === 1) {
@@ -600,9 +830,7 @@ describe("web_search kimi provider", () => {
       | { content?: string; tool_call_id?: string }
       | undefined;
     expect(toolMessage?.tool_call_id).toBe("call_1");
-    expect(JSON.parse(toolMessage?.content ?? "{}")).toMatchObject({
-      search_results: [{ url: "https://openclaw.ai/docs" }],
-    });
+    expect(JSON.parse(toolMessage?.content ?? "{}")).toMatchObject({ q: "openclaw" });
 
     const details = result?.details as {
       citations?: string[];
@@ -694,7 +922,7 @@ describe("web_search external content wrapping", () => {
     const mockFetch = installBraveLlmContextFetch({
       title: "Context title",
       url: "https://example.com/ctx",
-      snippets: [{ text: "Context chunk one" }, { text: "Context chunk two" }],
+      snippets: ["Context chunk one", "Context chunk two"],
     });
 
     const tool = createWebSearchTool({

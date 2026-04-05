@@ -30,10 +30,9 @@ export function restartGatewayProcessWithFreshPid(): GatewayRespawnResult {
   }
   const supervisor = detectRespawnSupervisor(process.env);
   if (supervisor) {
-    // launchd: exit(0) is sufficient — KeepAlive=true restarts the service.
-    // Self-issued `kickstart -k` races with launchd's bootout state machine
-    // and can leave the LaunchAgent permanently unloaded.
-    // See: https://github.com/openclaw/openclaw/issues/39760
+    // On macOS launchd, exit cleanly and let KeepAlive relaunch the service.
+    // Avoid detached kickstart/start handoffs here so restart timing stays tied
+    // to launchd's native supervision rather than a second helper process.
     if (supervisor === "schtasks") {
       const restart = triggerOpenClawRestart();
       if (!restart.ok) {

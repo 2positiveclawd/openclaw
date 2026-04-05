@@ -1,6 +1,11 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage } from "@mariozechner/pi-ai";
 import { extractTextFromChatContent } from "../shared/chat-content.js";
+import {
+  normalizeAssistantPhase,
+  parseAssistantTextSignature,
+  type AssistantPhase,
+} from "../shared/chat-message-content.js";
 import { stripReasoningTagsFromText } from "../shared/text/reasoning-tags.js";
 import { sanitizeUserFacingText } from "./pi-embedded-helpers.js";
 import { formatToolDetail, resolveToolDisplay } from "./tool-display.js";
@@ -31,6 +36,32 @@ export function stripMinimaxToolCallXml(text: string): string {
   cleaned = cleaned.replace(/<\/?minimax:tool_call>/gi, "");
 
   return cleaned;
+}
+
+/**
+ * Strip model control tokens leaked into assistant text output.
+ *
+ * Models like GLM-5 and DeepSeek sometimes emit internal delimiter tokens
+ * (e.g. `<|assistant|>`, `<|tool_call_result_begin|>`, `<｜begin▁of▁sentence｜>`)
+ * in their responses. These use the universal `<|...|>` convention (ASCII or
+ * full-width pipe variants) and should never reach end users.
+ *
+ * This is a provider bug — no upstream fix tracked yet.
+ * Remove this function when upstream providers stop leaking tokens.
+ * @see https://github.com/openclaw/openclaw/issues/40020
+ */
+// Match both ASCII pipe <|...|> and full-width pipe <｜...｜> (U+FF5C) variants.
+const MODEL_SPECIAL_TOKEN_RE = /<[|｜][^|｜]*[|｜]>/g;
+
+export function stripModelSpecialTokens(text: string): string {
+  if (!text) {
+    return text;
+  }
+  if (!MODEL_SPECIAL_TOKEN_RE.test(text)) {
+    return text;
+  }
+  MODEL_SPECIAL_TOKEN_RE.lastIndex = 0;
+  return text.replace(MODEL_SPECIAL_TOKEN_RE, " ").replace(/  +/g, " ").trim();
 }
 
 /**
@@ -207,20 +238,93 @@ export function stripThinkingTagsFromText(text: string): string {
   return stripReasoningTagsFromText(text, { mode: "strict", trim: "both" });
 }
 
+function sanitizeAssistantText(text: string): string {
+  return stripThinkingTagsFromText(
+    stripDowngradedToolCallText(stripModelSpecialTokens(stripMinimaxToolCallXml(text))),
+  ).trim();
+}
+
+function finalizeAssistantExtraction(msg: AssistantMessage, extracted: string): string {
+  const errorContext = msg.stopReason === "error";
+  return sanitizeUserFacingText(extracted, { errorContext });
+}
+
+function extractAssistantTextForPhase(msg: AssistantMessage, phase?: AssistantPhase): string {
+  const messagePhase = normalizeAssistantPhase((msg as { phase?: unknown }).phase);
+  const shouldIncludeContent = (resolvedPhase?: AssistantPhase) => {
+    if (phase) {
+      return resolvedPhase === phase;
+    }
+    return resolvedPhase === undefined;
+  };
+
+  if (typeof msg.content === "string") {
+    return shouldIncludeContent(messagePhase)
+      ? finalizeAssistantExtraction(msg, sanitizeAssistantText(msg.content))
+      : "";
+  }
+
+  if (!Array.isArray(msg.content)) {
+    return "";
+  }
+
+  const hasExplicitPhasedTextBlocks = msg.content.some((block) => {
+    if (!block || typeof block !== "object") {
+      return false;
+    }
+    const record = block as { type?: unknown; textSignature?: unknown };
+    if (record.type !== "text") {
+      return false;
+    }
+    return Boolean(parseAssistantTextSignature(record.textSignature)?.phase);
+  });
+
+  const extracted =
+    extractTextFromChatContent(
+      msg.content.filter((block) => {
+        if (!block || typeof block !== "object") {
+          return false;
+        }
+        const record = block as { type?: unknown; textSignature?: unknown };
+        if (record.type !== "text") {
+          return false;
+        }
+        const signature = parseAssistantTextSignature(record.textSignature);
+        const resolvedPhase =
+          signature?.phase ?? (hasExplicitPhasedTextBlocks ? undefined : messagePhase);
+        return shouldIncludeContent(resolvedPhase);
+      }),
+      {
+        sanitizeText: (text) => sanitizeAssistantText(text),
+        joinWith: "\n",
+        normalizeText: (text) => text.trim(),
+      },
+    ) ?? "";
+
+  return finalizeAssistantExtraction(msg, extracted);
+}
+
+export function extractAssistantVisibleText(msg: AssistantMessage): string {
+  const finalAnswerText = extractAssistantTextForPhase(msg, "final_answer");
+  if (finalAnswerText.trim()) {
+    return finalAnswerText;
+  }
+
+  return extractAssistantTextForPhase(msg);
+}
+
 export function extractAssistantText(msg: AssistantMessage): string {
   const extracted =
     extractTextFromChatContent(msg.content, {
-      sanitizeText: (text) =>
-        stripThinkingTagsFromText(
-          stripDowngradedToolCallText(stripMinimaxToolCallXml(text)),
-        ).trim(),
+      sanitizeText: (text) => sanitizeAssistantText(text),
       joinWith: "\n",
       normalizeText: (text) => text.trim(),
     }) ?? "";
   // Only apply keyword-based error rewrites when the assistant message is actually an error.
   // Otherwise normal prose that *mentions* errors (e.g. "context overflow") can get clobbered.
-  const errorContext = msg.stopReason === "error" || Boolean(msg.errorMessage?.trim());
-  return sanitizeUserFacingText(extracted, { errorContext });
+  // Gate on stopReason only — a non-error response with an errorMessage set (e.g. from a
+  // background tool failure) should not have its content rewritten (#13935).
+  return finalizeAssistantExtraction(msg, extracted);
 }
 
 export function extractAssistantThinking(msg: AssistantMessage): string {
