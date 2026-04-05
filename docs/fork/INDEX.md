@@ -1,5 +1,15 @@
 # OpenClawd Documentation Index
 
+> **Historical snapshot — most docs here describe the fork state before 2026-04-05.**
+> The OpenClaw TypeScript gateway is retired; active runtime is the AgentHub .NET
+> daemon. The fork on this repo is kept minimal (two patches — Azure Managed
+> Identity auth + browser stealth). For the **current** fork patch state and the
+> upstream merge workflow, see [LOCAL-PATCHES.md](./LOCAL-PATCHES.md) — it is the
+> only doc in this directory actively maintained. Everything else (fork
+> extensions like goal-loop/planner/researcher/trend-scout, extension-bridge,
+> dashboard integration notes) reflects the pre-merge architecture and is kept
+> as reference for the .NET port only.
+
 > Complete documentation for the OpenClawd AI agent orchestration platform.
 
 ## Quick Start

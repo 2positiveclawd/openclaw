@@ -102,39 +102,33 @@ The OpenClaw fork code at `/home/azureuser/openclaw/` is kept as reference for t
 - In chat replies, file references must be repo-root relative only (example: `src/telegram/index.ts:80`); never absolute paths or `~/...`.
 - Do not edit files covered by security-focused `CODEOWNERS` rules unless a listed owner explicitly asked for the change or is already reviewing it with you. Treat those paths as restricted surfaces, not drive-by cleanup.
 
-## Pending PRs (local untracked code — reapply after `git pull` until merged)
+## Local Fork Patches (minimal — reapply after upstream merge conflicts)
 
-- **goal-loop extension** (`extensions/goal-loop/`): Autonomous goal-directed agent loops with budget controls, progress evaluation, and governance. Untracked — not yet in upstream. If `git pull` wipes the working tree, the extension source lives in this branch/PR. The companion agent skill lives externally at `~/.openclaw/extensions/goal-skill/` and is unaffected by pulls.
+> **Full documentation:** See `docs/fork/LOCAL-PATCHES.md` for the complete merge workflow, conflict strategy, and footguns.
 
-## Local Fork Patches (reapply after upstream merge conflicts)
+After the 2026-04-05 merge we keep the fork as thin as possible. Only two patches remain — everything else tracks upstream exactly.
 
-> **Full documentation:** See `docs/fork/LOCAL-PATCHES.md` for detailed instructions on applying patches after merge conflicts.
+### 1. Azure Managed Identity auth — `src/agents/model-auth.ts`
 
-These are minimal patches we maintain locally. If `git pull` causes conflicts in these files, reapply the patches described below.
+Our VM authenticates to Azure OpenAI via IMDS (no API keys on disk). Upstream has AWS Bedrock managed-identity but no Azure equivalent.
 
-### Extension Bridge Entry Point
+- `fetchAzureManagedIdentityToken()` + token cache
+- `isAzureProvider(provider)` (uses upstream `normalizeProviderId`)
+- Integration inside `resolveApiKeyForProvider`, right after the amazon-bedrock branch, returning `{ apiKey: token, source: "azure-managed-identity", mode: "token" }`
 
-**New file:** `src/extension-bridge/index.ts` — Dedicated entry point for fork extension imports.
+### 2. Browser stealth — `extensions/browser/src/browser/{stealth,chrome,pw-session}.ts`
 
-**Why:** Extensions need core orchestration functions. Previously we patched `src/plugin-sdk/index.ts` (high conflict risk). Now we use a separate `extension-bridge` entry point, keeping plugin-sdk upstream-clean.
+Anti-bot detection bypass for browser automation.
 
-**Config patches (low conflict risk):**
+- `stealth.ts` is self-contained (exports `getStealthLaunchArgs`, `isStealthEnabled`, `applyStealthToContext` — fingerprint-{generator,injector} are lazy-imported with try/catch softfail)
+- `chrome.ts` calls `getStealthLaunchArgs` inside `buildOpenClawChromeLaunchArgs` when `isStealthEnabled()`
+- `pw-session.ts` calls `applyStealthToContext` inside `observeContext` when `isStealthEnabled()`
 
-- `tsdown.config.ts` — +7 lines (extension-bridge build entry)
-- `package.json` — +1 line in `exports` (`"./extension-bridge"`)
-- `src/plugins/loader.ts` — +25 lines (jiti alias for `openclaw/extension-bridge`)
+Enable at runtime by adding `--disable-blink-features=AutomationControlled` to `browser.extraArgs` in `~/.openclaw/openclaw.json`.
 
-**Note:** `src/plugin-sdk/index.ts` has **zero** fork-specific exports.
+### Dropped in 2026-04-05 (do NOT re-add)
 
-### Extension Core-Bridge Files
-
-**Files:**
-
-- `extensions/goal-loop/src/core-bridge.ts`
-- `extensions/planner/src/core-bridge.ts`
-- `extensions/researcher/src/core-bridge.ts`
-
-**Import path:** `openclaw/extension-bridge` (for orchestration APIs). Extensions keep `openclaw/plugin-sdk` for standard plugin types (OpenClawConfig, etc.).
+Extension bridge pattern + fork extensions (goal-loop, planner, researcher, trend-scout), `CronDeliveryContract` runner-owned/task-owned work, `isRecoverableException` + uncaughtException classifier. All dropped in favor of upstream equivalents or because they depended on paths upstream moved. See `docs/fork/LOCAL-PATCHES.md` for the full rationale.
 
 ## Project Structure & Module Organization
 
