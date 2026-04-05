@@ -54,12 +54,8 @@ function formatTabsToolResult(tabs: unknown[]): AgentToolResult<unknown> {
   };
 }
 
-function isChromeStaleTargetError(profile: string | undefined, err: unknown): boolean {
-  if (profile !== "chrome") {
-    return false;
-  }
-  const msg = String(err);
-  return msg.includes("404:") && msg.includes("tab not found");
+function isStaleTargetError(err: unknown): boolean {
+  return String(err).toLowerCase().includes("tab not found");
 }
 
 function stripTargetIdFromActRequest(
@@ -83,6 +79,68 @@ function canRetryChromeActWithoutTargetId(request: Parameters<typeof browserAct>
         ? typedRequest.action
         : "";
   return kind === "hover" || kind === "scrollIntoView" || kind === "wait";
+}
+
+const ACT_INTERACTION_KINDS_USING_SNAPSHOT_REFS = new Set([
+  "click",
+  "type",
+  "hover",
+  "scrollIntoView",
+  "drag",
+  "select",
+  "fill",
+]);
+
+const ACT_KINDS_REQUIRING_REF = new Set(["click", "type", "hover", "scrollIntoView", "select"]);
+
+function readActKind(request: Parameters<typeof browserAct>[1]): string {
+  const typedRequest = request as Partial<Record<"kind" | "action", unknown>>;
+  if (typeof typedRequest.kind === "string") {
+    return typedRequest.kind;
+  }
+  if (typeof typedRequest.action === "string") {
+    return typedRequest.action;
+  }
+  return "";
+}
+
+function hasNonEmptyString(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function validateActRequestShape(request: Parameters<typeof browserAct>[1]): void {
+  const kind = readActKind(request);
+  const raw = request as Record<string, unknown>;
+
+  if (kind === "fill") {
+    const fields = Array.isArray(raw.fields) ? raw.fields : [];
+    if (!fields.length) {
+      throw new Error(
+        'Invalid browser act request: kind="fill" requires fields=[...]. Use fields=[...] to fill forms, or use kind="type" with ref+text for a single input. Use snapshot refs and keep the same targetId/tab between snapshot and act.',
+      );
+    }
+  }
+
+  if (
+    Object.hasOwn(raw, "selector") &&
+    kind !== "wait" &&
+    ACT_INTERACTION_KINDS_USING_SNAPSHOT_REFS.has(kind)
+  ) {
+    throw new Error(
+      `Invalid browser act request: kind="${kind}" cannot use selector. selector is only supported for wait. Use snapshot refs (ref/startRef/endRef) and keep the same targetId/tab between snapshot and act.`,
+    );
+  }
+
+  if (ACT_KINDS_REQUIRING_REF.has(kind) && !hasNonEmptyString(raw.ref)) {
+    throw new Error(
+      `Invalid browser act request: kind="${kind}" requires ref. Use snapshot refs and keep the same targetId/tab between snapshot and act.`,
+    );
+  }
+}
+
+function buildTabsCommandHint(profile: string | undefined): string {
+  const trimmedProfile = typeof profile === "string" ? profile.trim() : "";
+  return trimmedProfile ? `action=tabs profile="${trimmedProfile}"` : "action=tabs";
 }
 
 export async function executeTabsAction(params: {
@@ -295,6 +353,8 @@ export async function executeActAction(params: {
   proxyRequest: BrowserProxyRequest | null;
 }): Promise<AgentToolResult<unknown>> {
   const { request, baseUrl, profile, proxyRequest } = params;
+  validateActRequestShape(request);
+
   try {
     const result = proxyRequest
       ? await proxyRequest({
@@ -308,8 +368,7 @@ export async function executeActAction(params: {
         });
     return jsonResult(result);
   } catch (err) {
-    if (isChromeStaleTargetError(profile, err)) {
-      const retryRequest = stripTargetIdFromActRequest(request);
+    if (isStaleTargetError(err)) {
       const tabs = proxyRequest
         ? ((
             (await proxyRequest({
@@ -319,33 +378,49 @@ export async function executeActAction(params: {
             })) as { tabs?: unknown[] }
           ).tabs ?? [])
         : await browserTabs(baseUrl, { profile }).catch(() => []);
-      // Some Chrome relay targetIds can go stale between snapshots and actions.
-      // Only retry safe read-only actions, and only when exactly one tab remains attached.
-      if (retryRequest && canRetryChromeActWithoutTargetId(request) && tabs.length === 1) {
-        try {
-          const retryResult = proxyRequest
-            ? await proxyRequest({
-                method: "POST",
-                path: "/act",
-                profile,
-                body: retryRequest,
-              })
-            : await browserAct(baseUrl, retryRequest, {
-                profile,
-              });
-          return jsonResult(retryResult);
-        } catch {
-          // Fall through to explicit stale-target guidance.
+
+      if (profile === "chrome") {
+        const retryRequest = stripTargetIdFromActRequest(request);
+        // Some Chrome relay targetIds can go stale between snapshots and actions.
+        // Only retry safe read-only actions, and only when exactly one tab remains attached.
+        if (retryRequest && canRetryChromeActWithoutTargetId(request) && tabs.length === 1) {
+          try {
+            const retryResult = proxyRequest
+              ? await proxyRequest({
+                  method: "POST",
+                  path: "/act",
+                  profile,
+                  body: retryRequest,
+                })
+              : await browserAct(baseUrl, retryRequest, {
+                  profile,
+                });
+            return jsonResult(retryResult);
+          } catch {
+            // Fall through to explicit stale-target guidance.
+          }
         }
+        if (!tabs.length) {
+          throw new Error(
+            "No Chrome tabs are attached via the OpenClaw Browser Relay extension. Click the toolbar icon on the tab you want to control (badge ON), then retry.",
+            { cause: err },
+          );
+        }
+        throw new Error(
+          'Chrome tab not found (stale targetId?). Run action=tabs profile="chrome", then take a fresh snapshot and keep the same targetId/tab between snapshot and act.',
+          { cause: err },
+        );
       }
+
+      const tabsCommandHint = buildTabsCommandHint(profile);
       if (!tabs.length) {
         throw new Error(
-          "No Chrome tabs are attached via the OpenClaw Browser Relay extension. Click the toolbar icon on the tab you want to control (badge ON), then retry.",
+          `Browser tab not found (stale targetId?). No tabs are currently available. Run ${tabsCommandHint}, open/focus the tab you want, then take a fresh snapshot and keep the same targetId/tab between snapshot and act.`,
           { cause: err },
         );
       }
       throw new Error(
-        `Chrome tab not found (stale targetId?). Run action=tabs profile="chrome" and use one of the returned targetIds.`,
+        `Browser tab not found (stale targetId?). Run ${tabsCommandHint}, use one returned targetId, then take a fresh snapshot and keep the same targetId/tab between snapshot and act.`,
         { cause: err },
       );
     }

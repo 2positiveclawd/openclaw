@@ -529,7 +529,9 @@ Notes:
   - `--interactive` outputs a flat, easy-to-pick list of interactive elements (best for driving actions).
   - `--labels` adds a viewport-only screenshot with overlayed ref labels (prints `MEDIA:<path>`).
 - `click`/`type`/etc require a `ref` from `snapshot` (either numeric `12` or role ref `e12`).
-  CSS selectors are intentionally not supported for actions.
+  CSS selectors are intentionally not supported for actions, except `wait` where `selector` is allowed.
+- Use `type` (`ref` + `text`) for one input. Use `fill` with `fields=[...]` for multi-field form filling.
+- Keep the same `targetId` and tab between `snapshot` and `act`. If you see `tab not found`, run `tabs`, pick a fresh `targetId`, then re-run `snapshot` before the next action.
 
 ## Snapshots and refs
 

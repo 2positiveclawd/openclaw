@@ -460,6 +460,76 @@ describe("browser tool act compatibility", () => {
   });
 });
 
+describe("browser tool act preflight", () => {
+  registerBrowserToolAfterEachReset();
+
+  it("rejects fill without fields before dispatch", async () => {
+    const tool = createBrowserTool();
+    let thrown: unknown;
+    try {
+      await tool.execute?.("call-1", {
+        action: "act",
+        request: {
+          kind: "fill",
+          targetId: "tab-1",
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(String(thrown)).toContain('kind="fill" requires fields=[...]');
+    expect(String(thrown)).toContain('use kind="type"');
+    expect(String(thrown)).toContain("same targetId/tab");
+    expect(browserActionsMocks.browserAct).not.toHaveBeenCalled();
+  });
+
+  it("rejects selector on interaction kinds with snapshot-ref guidance", async () => {
+    const tool = createBrowserTool();
+    let thrown: unknown;
+    try {
+      await tool.execute?.("call-1", {
+        action: "act",
+        request: {
+          kind: "click",
+          selector: "#submit",
+          ref: "e12",
+          targetId: "tab-1",
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(String(thrown)).toContain("selector is only supported for wait");
+    expect(String(thrown)).toContain("snapshot refs");
+    expect(String(thrown)).toContain("same targetId/tab");
+    expect(browserActionsMocks.browserAct).not.toHaveBeenCalled();
+  });
+
+  it("rejects missing ref for interactive kinds before dispatch", async () => {
+    const tool = createBrowserTool();
+    let thrown: unknown;
+    try {
+      await tool.execute?.("call-1", {
+        action: "act",
+        request: {
+          kind: "type",
+          text: "hello",
+          targetId: "tab-1",
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(String(thrown)).toContain('kind="type" requires ref');
+    expect(String(thrown)).toContain("snapshot refs");
+    expect(String(thrown)).toContain("same targetId/tab");
+    expect(browserActionsMocks.browserAct).not.toHaveBeenCalled();
+  });
+});
+
 describe("browser tool snapshot labels", () => {
   registerBrowserToolAfterEachReset();
 
@@ -667,6 +737,31 @@ describe("browser tool act stale target recovery", () => {
       }),
     ).rejects.toThrow(/Run action=tabs profile="chrome"/i);
 
+    expect(browserActionsMocks.browserAct).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns stale-target guidance for openclaw-managed tabs", async () => {
+    browserActionsMocks.browserAct.mockRejectedValueOnce(new Error("404: tab not found"));
+    browserClientMocks.browserTabs.mockResolvedValueOnce([{ targetId: "tab-1" }]);
+
+    const tool = createBrowserTool();
+    let thrown: unknown;
+    try {
+      await tool.execute?.("call-1", {
+        action: "act",
+        profile: "openclaw",
+        request: {
+          kind: "click",
+          targetId: "stale-tab",
+          ref: "btn-1",
+        },
+      });
+    } catch (err) {
+      thrown = err;
+    }
+
+    expect(String(thrown)).toContain('Run action=tabs profile="openclaw"');
+    expect(String(thrown)).toContain("fresh snapshot");
     expect(browserActionsMocks.browserAct).toHaveBeenCalledTimes(1);
   });
 });
