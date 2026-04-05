@@ -1,7 +1,15 @@
+import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
+import { loadSessionStore } from "../config/sessions.js";
+import { resolveStorePath } from "../config/sessions/paths.js";
 import { normalizeStoredCronJobs } from "../cron/store-migration.js";
 import { resolveCronStorePath, loadCronStore, saveCronStore } from "../cron/store.js";
+import {
+  collectKnownDiscordChannelIdsForSessionKey,
+  collectKnownDiscordChannelIdsFromSessionStore,
+  extractEmbeddedDiscordChannelIds,
+} from "../cron/system-event-channel-id-lint.js";
 import type { CronJob } from "../cron/types.js";
 import { note } from "../terminal/note.js";
 import { shortenHomePath } from "../utils.js";
@@ -57,6 +65,79 @@ function formatLegacyIssuePreview(issues: Partial<Record<string, number>>): stri
 
 function trimString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function findEmbeddedDiscordChannelLintWarnings(params: {
+  cfg: OpenClawConfig;
+  jobs: Array<Record<string, unknown>>;
+}): string[] {
+  const defaultAgentId = resolveDefaultAgentId(params.cfg);
+  const sessionStorePath = resolveStorePath(params.cfg.session?.store, {
+    agentId: defaultAgentId,
+  });
+  const sessionStore = loadSessionStore(sessionStorePath, { skipCache: true });
+  const baseKnownDiscordChannelIds = collectKnownDiscordChannelIdsFromSessionStore(sessionStore);
+  const warnings: string[] = [];
+
+  for (const raw of params.jobs) {
+    const payload = raw.payload;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      continue;
+    }
+    if ((payload as { kind?: unknown }).kind !== "systemEvent") {
+      continue;
+    }
+    const text = trimString((payload as { text?: unknown }).text);
+    if (!text) {
+      continue;
+    }
+
+    const sessionTarget = trimString(raw.sessionTarget)?.toLowerCase() ?? "main";
+    if (sessionTarget !== "main") {
+      continue;
+    }
+
+    const knownDiscordChannelIds = new Set(baseKnownDiscordChannelIds);
+    const sessionKey = trimString(raw.sessionKey);
+    for (const id of collectKnownDiscordChannelIdsForSessionKey({
+      store: sessionStore,
+      sessionKey,
+    })) {
+      knownDiscordChannelIds.add(id);
+    }
+
+    const allEmbeddedIds = extractEmbeddedDiscordChannelIds(text);
+    if (allEmbeddedIds.length === 0) {
+      continue;
+    }
+
+    const unresolved = allEmbeddedIds.filter((id) => !knownDiscordChannelIds.has(id));
+    const jobName =
+      trimString(raw.name) ?? trimString(raw.id) ?? trimString(raw.jobId) ?? "<unnamed>";
+    if (unresolved.length > 0) {
+      warnings.push(
+        `Cron job "${jobName}" embeds unresolved Discord target(s) in payload.text: ${unresolved
+          .map((id) => `channelId=${id}`)
+          .join(", ")}.`,
+      );
+      continue;
+    }
+
+    const stateRecord =
+      raw.state && typeof raw.state === "object" && !Array.isArray(raw.state)
+        ? (raw.state as Record<string, unknown>)
+        : null;
+    const lastError = trimString(stateRecord?.lastError);
+    if (lastError && /unknown channel/i.test(lastError)) {
+      warnings.push(
+        `Cron job "${jobName}" embeds Discord target hint(s) in payload.text (${allEmbeddedIds
+          .map((id) => `channelId=${id}`)
+          .join(", ")}) and is currently failing with lastError: ${lastError}.`,
+      );
+    }
+  }
+
+  return warnings;
 }
 
 function migrateLegacyNotifyFallback(params: {
@@ -134,12 +215,19 @@ export async function maybeRepairLegacyCronStore(params: {
   const legacyWebhook = trimString(params.cfg.cron?.webhook);
   const notifyCount = rawJobs.filter((job) => job.notify === true).length;
   const previewLines = formatLegacyIssuePreview(normalized.issues);
+  const embeddedLintWarnings = findEmbeddedDiscordChannelLintWarnings({
+    cfg: params.cfg,
+    jobs: rawJobs,
+  });
   if (notifyCount > 0) {
     previewLines.push(
       `- ${pluralize(notifyCount, "job")} still uses legacy \`notify: true\` webhook fallback`,
     );
   }
   if (previewLines.length === 0) {
+    if (embeddedLintWarnings.length > 0) {
+      note(embeddedLintWarnings.join("\n"), "Doctor warnings");
+    }
     return;
   }
 
@@ -177,7 +265,8 @@ export async function maybeRepairLegacyCronStore(params: {
     note(`Cron store normalized at ${shortenHomePath(storePath)}.`, "Doctor changes");
   }
 
-  if (notifyMigration.warnings.length > 0) {
-    note(notifyMigration.warnings.join("\n"), "Doctor warnings");
+  const doctorWarnings = [...notifyMigration.warnings, ...embeddedLintWarnings];
+  if (doctorWarnings.length > 0) {
+    note(doctorWarnings.join("\n"), "Doctor warnings");
   }
 }

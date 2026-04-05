@@ -23,11 +23,15 @@ async function runExplicitTelegramAnnounceTurn(params: {
   home: string;
   storePath: string;
   deps: CliDeps;
-  deliveryContract?: "cron-owned" | "shared";
+  deliveryContract?: "cron-owned" | "task-owned" | "shared";
+  delivery?: Partial<typeof TELEGRAM_TARGET & { contract?: "runner-owned" | "task-owned" }>;
 }): Promise<Awaited<ReturnType<typeof runCronIsolatedAgentTurn>>> {
   return runTelegramAnnounceTurn({
     ...params,
-    delivery: TELEGRAM_TARGET,
+    delivery: {
+      ...TELEGRAM_TARGET,
+      ...params.delivery,
+    },
   });
 }
 
@@ -303,6 +307,26 @@ describe("runCronIsolatedAgentTurn", () => {
         storePath,
         deps,
         deliveryContract: "shared",
+      });
+
+      expectDeliveredOk(res);
+      expect(runSubagentAnnounceFlow).not.toHaveBeenCalled();
+      expect(deps.sendMessageTelegram).not.toHaveBeenCalled();
+    });
+  });
+
+  it("skips runner announce in task-owned mode when messaging tool already sent to configured target", async () => {
+    await withTelegramAnnounceFixture(async ({ home, storePath, deps }) => {
+      mockAgentPayloads([{ text: "sent" }], {
+        didSendViaMessagingTool: true,
+        messagingToolSentTargets: [{ tool: "message", provider: "telegram", to: "123" }],
+      });
+
+      const res = await runExplicitTelegramAnnounceTurn({
+        home,
+        storePath,
+        deps,
+        delivery: { contract: "task-owned" },
       });
 
       expectDeliveredOk(res);

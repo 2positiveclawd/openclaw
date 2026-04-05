@@ -83,6 +83,30 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]?.disableMessageTool).toBe(true);
   });
 
+  it("keeps the message tool enabled for task-owned delivery jobs", async () => {
+    mockFallbackPassthrough();
+    resolveCronDeliveryPlanMock.mockReturnValue({
+      requested: true,
+      mode: "announce",
+      channel: "telegram",
+      to: "123",
+    });
+
+    await runCronIsolatedAgentTurn({
+      ...makeParams(),
+      job: {
+        ...makeParams().job,
+        delivery: { mode: "announce", contract: "task-owned", channel: "telegram", to: "123" },
+      },
+    });
+
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
+    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]?.disableMessageTool).toBe(false);
+    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]?.prompt).not.toContain(
+      "note who/where it should go instead of sending it yourself",
+    );
+  });
+
   it("keeps the message tool enabled for shared callers when delivery is not requested", async () => {
     mockFallbackPassthrough();
     resolveCronDeliveryPlanMock.mockReturnValue({

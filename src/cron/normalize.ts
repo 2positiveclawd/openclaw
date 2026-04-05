@@ -201,6 +201,18 @@ function coerceDelivery(delivery: UnknownRecord) {
   } else if ("accountId" in next && typeof next.accountId !== "string") {
     delete next.accountId;
   }
+  if (typeof delivery.contract === "string") {
+    const trimmed = delivery.contract.trim().toLowerCase();
+    if (trimmed === "task-owned" || trimmed === "task") {
+      next.contract = "task-owned";
+    } else if (trimmed === "runner-owned" || trimmed === "runner" || trimmed === "cron-owned") {
+      next.contract = "runner-owned";
+    } else {
+      delete next.contract;
+    }
+  } else if ("contract" in next && typeof next.contract !== "string") {
+    delete next.contract;
+  }
   return next;
 }
 

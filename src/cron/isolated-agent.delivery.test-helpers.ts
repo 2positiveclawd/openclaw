@@ -53,8 +53,9 @@ export async function runTelegramAnnounceTurn(params: {
     channel: string;
     to?: string;
     bestEffort?: boolean;
+    contract?: "runner-owned" | "task-owned";
   };
-  deliveryContract?: "cron-owned" | "shared";
+  deliveryContract?: "cron-owned" | "task-owned" | "shared";
 }): Promise<Awaited<ReturnType<typeof runCronIsolatedAgentTurn>>> {
   return runCronIsolatedAgentTurn({
     cfg: makeCfg(params.home, params.storePath, {

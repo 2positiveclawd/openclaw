@@ -252,11 +252,12 @@ PAYLOAD TYPES (payload.kind):
   { "kind": "agentTurn", "message": "<prompt>", "model": "<optional>", "thinking": "<optional>", "timeoutSeconds": <optional, 0 means no timeout> }
 
 DELIVERY (top-level):
-  { "mode": "none|announce|webhook", "channel": "<optional>", "to": "<optional>", "bestEffort": <optional-bool> }
-  - Default for isolated agentTurn jobs (when delivery omitted): "announce"
+  { "mode": "none|announce|webhook", "channel": "<optional>", "to": "<optional>", "contract": "runner-owned|task-owned", "bestEffort": <optional-bool> }
+  - Default for isolated agentTurn jobs (when delivery omitted): "announce" + contract "runner-owned"
   - announce: send to chat channel (optional channel/to target)
   - webhook: send finished-run event as HTTP POST to delivery.to (URL required)
-  - If the task needs to send to a specific chat/recipient, set announce delivery.channel/to; do not call messaging tools inside the run.
+  - contract "runner-owned" (default): runner owns delivery, message tool sends should not be requested in prompt.
+  - contract "task-owned": task may intentionally use message.send; runner skips duplicate announce if task already sent to the same configured target.
 
 CRITICAL CONSTRAINTS:
 - sessionTarget="main" REQUIRES payload.kind="systemEvent"

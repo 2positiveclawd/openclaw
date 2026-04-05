@@ -144,6 +144,22 @@ describe("applyJobPatch", () => {
     expect(job.delivery?.accountId).toBeUndefined();
   });
 
+  it("merges delivery.contract and preserves it across patches", () => {
+    const job = createIsolatedAgentTurnJob("job-contract", {
+      mode: "announce",
+      channel: "discord",
+      to: "channel:123",
+      contract: "runner-owned",
+    });
+
+    applyJobPatch(job, { delivery: { contract: "task-owned" } });
+    expect(job.delivery?.contract).toBe("task-owned");
+
+    applyJobPatch(job, { delivery: { mode: "announce", to: "channel:456" } });
+    expect(job.delivery?.contract).toBe("task-owned");
+    expect(job.delivery?.to).toBe("channel:456");
+  });
+
   it("persists agentTurn payload.lightContext updates when editing existing jobs", () => {
     const job = createIsolatedAgentTurnJob("job-light-context", {
       mode: "announce",
@@ -189,6 +205,44 @@ describe("applyJobPatch", () => {
     if (payload.kind === "agentTurn") {
       expect(payload.lightContext).toBe(true);
     }
+  });
+
+  it("rejects runner-owned jobs that explicitly instruct message.send", () => {
+    const job = createIsolatedAgentTurnJob("job-runner-owned-message-send", {
+      mode: "announce",
+      channel: "discord",
+      to: "channel:123",
+      contract: "runner-owned",
+    });
+
+    expect(() =>
+      applyJobPatch(job, {
+        payload: {
+          kind: "agentTurn",
+          message: "Check updates, then call message.send to post to Discord.",
+        },
+      }),
+    ).toThrow(
+      'runner-owned isolated cron jobs cannot explicitly instruct outbound message-tool sends; set delivery.contract="task-owned" or remove message.send instructions',
+    );
+  });
+
+  it("allows explicit message.send instructions for task-owned jobs", () => {
+    const job = createIsolatedAgentTurnJob("job-task-owned-message-send", {
+      mode: "announce",
+      channel: "discord",
+      to: "channel:123",
+      contract: "task-owned",
+    });
+
+    expect(() =>
+      applyJobPatch(job, {
+        payload: {
+          kind: "agentTurn",
+          message: "Check updates, then call message.send to post to Discord.",
+        },
+      }),
+    ).not.toThrow();
   });
 
   it("rejects webhook delivery without a valid http(s) target URL", () => {
@@ -587,6 +641,26 @@ describe("createJob delivery defaults", () => {
       delivery: { mode: "none" },
     });
     expect(job.delivery).toEqual({ mode: "none" });
+  });
+
+  it("rejects runner-owned create payloads that explicitly instruct message.send", () => {
+    const state = createMockState(now);
+    expect(() =>
+      createJob(state, {
+        name: "isolated-runner-owned-send",
+        enabled: true,
+        schedule: { kind: "every", everyMs: 60_000 },
+        sessionTarget: "isolated",
+        wakeMode: "now",
+        payload: {
+          kind: "agentTurn",
+          message: "Use message.send to post updates to Discord.",
+        },
+        delivery: { mode: "announce", contract: "runner-owned", channel: "discord", to: "123" },
+      }),
+    ).toThrow(
+      'runner-owned isolated cron jobs cannot explicitly instruct outbound message-tool sends; set delivery.contract="task-owned" or remove message.send instructions',
+    );
   });
 
   it("does not set delivery for main systemEvent jobs without explicit delivery", () => {

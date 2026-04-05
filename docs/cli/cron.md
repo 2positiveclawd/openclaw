@@ -16,8 +16,11 @@ Related:
 
 Tip: run `openclaw cron --help` for the full command surface.
 
-Note: isolated `cron add` jobs default to `--announce` delivery. Use `--no-deliver` to keep
-output internal. `--deliver` remains as a deprecated alias for `--announce`.
+Note: isolated `cron add` jobs default to `--announce` delivery in `runner-owned` contract mode.
+Use `--no-deliver` to keep output internal. `--deliver` remains as a deprecated alias for `--announce`.
+
+Note: delivery contract (`runner-owned` vs `task-owned`) is part of the top-level `delivery`
+object (`delivery.contract`) for gateway/tool calls.
 
 Note: one-shot (`--at`) jobs delete after success by default. Use `--keep-after-run` to keep them.
 
@@ -35,6 +38,10 @@ Upgrade note: if you have older cron jobs from before the current delivery/store
 top-level delivery fields, payload `provider` delivery aliases) and migrates simple
 `notify: true` webhook fallback jobs to explicit webhook delivery when `cron.webhook` is
 configured.
+
+Doctor also warns about main-session `systemEvent` jobs that hide unresolved Discord targets in
+free-text payloads, for example `channelId=<digits>`. New add/edit operations reject those stale
+embedded ids early when they cannot be matched to a known Discord session target.
 
 ## Common edits
 

@@ -80,8 +80,8 @@ export type RunCronAgentTurnResult = {
   /**
    * `true` when the isolated runner already handled the run's user-visible
    * delivery outcome. Cron-owned callers use this for cron delivery or
-   * explicit suppression; shared callers may also use it for a matching
-   * message-tool send that already reached the target.
+   * explicit suppression; task-owned/shared callers may also use it for a
+   * matching message-tool send that already reached the target.
    */
   delivered?: boolean;
   /**
@@ -143,7 +143,13 @@ function buildCronAgentDefaultsConfig(params: {
 
 type ResolvedCronDeliveryTarget = Awaited<ReturnType<typeof resolveDeliveryTarget>>;
 
-type IsolatedDeliveryContract = "cron-owned" | "shared";
+type IsolatedDeliveryContract = "cron-owned" | "task-owned" | "shared";
+
+function resolveIsolatedCronDeliveryContract(job: CronJob): IsolatedDeliveryContract {
+  const raw =
+    typeof job.delivery?.contract === "string" ? job.delivery.contract.trim().toLowerCase() : "";
+  return raw === "task-owned" ? "task-owned" : "cron-owned";
+}
 
 function resolveCronToolPolicy(params: {
   deliveryRequested: boolean;
@@ -155,10 +161,15 @@ function resolveCronToolPolicy(params: {
     // was successfully resolved. When resolution fails the agent should not
     // be blocked by a target it cannot satisfy (#27898).
     requireExplicitMessageTarget: params.deliveryRequested && params.resolvedDelivery.ok,
-    // Cron-owned runs always route user-facing delivery through the runner
-    // itself. Shared callers keep the previous behavior so non-cron paths do
-    // not silently lose the message tool when no explicit delivery is active.
-    disableMessageTool: params.deliveryContract === "cron-owned" ? true : params.deliveryRequested,
+    // Cron-owned runs always route user-facing delivery through the runner.
+    // Task-owned runs keep message tools available so watcher-style tasks can
+    // intentionally send their own channel updates.
+    disableMessageTool:
+      params.deliveryContract === "cron-owned"
+        ? true
+        : params.deliveryContract === "task-owned"
+          ? false
+          : params.deliveryRequested,
   };
 }
 
@@ -190,8 +201,9 @@ async function resolveCronDeliveryContext(params: {
 function appendCronDeliveryInstruction(params: {
   commandBody: string;
   deliveryRequested: boolean;
+  deliveryContract: IsolatedDeliveryContract;
 }) {
-  if (!params.deliveryRequested) {
+  if (!params.deliveryRequested || params.deliveryContract === "task-owned") {
     return params.commandBody;
   }
   return `${params.commandBody}\n\nReturn your summary as plain text; it will be delivered automatically. If the task explicitly calls for messaging a specific external recipient, note who/where it should go instead of sending it yourself.`.trim();
@@ -218,7 +230,8 @@ export async function runCronIsolatedAgentTurn(params: {
       : "cron: job execution timed out";
   };
   const isFastTestEnv = process.env.OPENCLAW_TEST_FAST === "1";
-  const deliveryContract = params.deliveryContract ?? "cron-owned";
+  const deliveryContract =
+    params.deliveryContract ?? resolveIsolatedCronDeliveryContract(params.job);
   const defaultAgentId = resolveDefaultAgentId(params.cfg);
   const requestedAgentId =
     typeof params.agentId === "string" && params.agentId.trim()
@@ -476,7 +489,11 @@ export async function runCronIsolatedAgentTurn(params: {
     // Internal/trusted source - use original format
     commandBody = `${base}\n${timeLine}`.trim();
   }
-  commandBody = appendCronDeliveryInstruction({ commandBody, deliveryRequested });
+  commandBody = appendCronDeliveryInstruction({
+    commandBody,
+    deliveryRequested,
+    deliveryContract,
+  });
 
   const existingSkillsSnapshot = cronSession.sessionEntry.skillsSnapshot;
   const skillsSnapshot = resolveCronSkillsSnapshot({
@@ -817,7 +834,9 @@ export async function runCronIsolatedAgentTurn(params: {
   const ackMaxChars = resolveHeartbeatAckMaxChars(agentCfg);
   const skipHeartbeatDelivery = deliveryRequested && isHeartbeatOnlyResponse(payloads, ackMaxChars);
   const skipMessagingToolDelivery =
-    deliveryContract === "shared" &&
+    // Task-owned/shared contracts may intentionally send via message tool.
+    // When they already sent to the configured target, skip runner announce.
+    deliveryContract !== "cron-owned" &&
     deliveryRequested &&
     finalRunResult.didSendViaMessagingTool === true &&
     (finalRunResult.messagingToolSentTargets ?? []).some((target) =>

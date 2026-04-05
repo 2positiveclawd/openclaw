@@ -1,5 +1,11 @@
+import { loadSessionStore } from "../../config/sessions.js";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
+import {
+  collectKnownDiscordChannelIdsForSessionKey,
+  collectKnownDiscordChannelIdsFromSessionStore,
+  findUnresolvedEmbeddedDiscordChannelIds,
+} from "../system-event-channel-id-lint.js";
 import type { CronJob, CronJobCreate, CronJobPatch } from "../types.js";
 import { normalizeCronCreateDeliveryInput } from "./initial-delivery.js";
 import {
@@ -87,6 +93,43 @@ async function ensureLoadedForRead(state: CronServiceState) {
   if (changed) {
     await persist(state);
   }
+}
+
+async function assertResolvableMainSessionEmbeddedDiscordChannelIds(
+  state: CronServiceState,
+  job: Pick<CronJob, "name" | "sessionTarget" | "sessionKey" | "payload">,
+) {
+  if (job.sessionTarget !== "main" || job.payload.kind !== "systemEvent") {
+    return;
+  }
+
+  const storePath =
+    state.deps.resolveSessionStorePath?.(state.deps.defaultAgentId) ?? state.deps.sessionStorePath;
+  if (!storePath) {
+    return;
+  }
+
+  const sessionStore = loadSessionStore(storePath, { skipCache: true });
+  const knownDiscordChannelIds = collectKnownDiscordChannelIdsFromSessionStore(sessionStore);
+  for (const id of collectKnownDiscordChannelIdsForSessionKey({
+    store: sessionStore,
+    sessionKey: job.sessionKey,
+  })) {
+    knownDiscordChannelIds.add(id);
+  }
+
+  const unresolved = findUnresolvedEmbeddedDiscordChannelIds({
+    text: job.payload.text,
+    knownDiscordChannelIds,
+  });
+  if (unresolved.length === 0) {
+    return;
+  }
+
+  const unresolvedTargets = unresolved.map((id) => `channelId=${id}`).join(", ");
+  throw new Error(
+    `cron main-session systemEvent payload for "${job.name}" references unresolved Discord target(s): ${unresolvedTargets}. Reuse a known Discord session target or remove embedded channelId hints from payload.text.`,
+  );
 }
 
 export async function start(state: CronServiceState) {
@@ -239,6 +282,7 @@ export async function add(state: CronServiceState, input: CronJobCreate) {
     await ensureLoaded(state);
     const normalizedInput = normalizeCronCreateDeliveryInput(input);
     const job = createJob(state, normalizedInput);
+    await assertResolvableMainSessionEmbeddedDiscordChannelIds(state, job);
     state.store?.jobs.push(job);
 
     // Defensive: recompute all next-run times to ensure consistency
@@ -274,6 +318,11 @@ export async function update(state: CronServiceState, id: string, patch: CronJob
     await ensureLoaded(state, { skipRecompute: true });
     const job = findJobOrThrow(state, id);
     const now = state.deps.nowMs();
+
+    const validatedPatchJob = structuredClone(job);
+    applyJobPatch(validatedPatchJob, patch, { defaultAgentId: state.deps.defaultAgentId });
+    await assertResolvableMainSessionEmbeddedDiscordChannelIds(state, validatedPatchJob);
+
     applyJobPatch(job, patch, { defaultAgentId: state.deps.defaultAgentId });
     if (job.schedule.kind === "every") {
       const anchor = job.schedule.anchorMs;

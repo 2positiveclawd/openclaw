@@ -262,6 +262,32 @@ describe("normalizeCronJobCreate", () => {
     expect("accountId" in delivery).toBe(false);
   });
 
+  it("normalizes delivery contract aliases", () => {
+    const normalized = normalizeIsolatedAgentTurnCreateJob({
+      name: "delivery contract",
+      delivery: {
+        mode: "announce",
+        contract: " task ",
+      },
+    });
+
+    const delivery = normalized.delivery as Record<string, unknown>;
+    expect(delivery.contract).toBe("task-owned");
+  });
+
+  it("maps legacy cron-owned delivery contract alias to runner-owned", () => {
+    const normalized = normalizeIsolatedAgentTurnCreateJob({
+      name: "delivery contract alias",
+      delivery: {
+        mode: "announce",
+        contract: "cron-owned",
+      },
+    });
+
+    const delivery = normalized.delivery as Record<string, unknown>;
+    expect(delivery.contract).toBe("runner-owned");
+  });
+
   it("normalizes webhook delivery mode and target URL", () => {
     const normalized = normalizeCronJobCreate({
       name: "webhook delivery",

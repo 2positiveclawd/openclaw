@@ -19,12 +19,24 @@ export type CronMessageChannel = ChannelId | "last";
 
 export type CronDeliveryMode = "none" | "announce" | "webhook";
 
+/**
+ * Ownership contract for isolated cron announce delivery.
+ * - runner-owned: cron runner owns user-visible delivery (default, back-compat)
+ * - task-owned: task can send via message tool to the configured target
+ */
+export type CronDeliveryContract = "runner-owned" | "task-owned";
+
 export type CronDelivery = {
   mode: CronDeliveryMode;
   channel?: CronMessageChannel;
   to?: string;
   /** Explicit channel account id for multi-account setups (e.g. multiple Telegram bots). */
   accountId?: string;
+  /**
+   * Isolated cron delivery ownership contract.
+   * Defaults to "runner-owned" when omitted.
+   */
+  contract?: CronDeliveryContract;
   bestEffort?: boolean;
   /** Separate destination for failure notifications. */
   failureDestination?: CronFailureDestination;

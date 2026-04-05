@@ -13,6 +13,7 @@ import {
 } from "../stagger.js";
 import type {
   CronDelivery,
+  CronDeliveryContract,
   CronDeliveryPatch,
   CronFailureAlert,
   CronJob,
@@ -219,6 +220,47 @@ function assertFailureDestinationSupport(job: Pick<CronJob, "sessionTarget" | "d
     }
     failureDestination.to = target;
   }
+}
+
+function resolveDeliveryContract(delivery: CronDelivery | undefined): CronDeliveryContract {
+  return delivery?.contract === "task-owned" ? "task-owned" : "runner-owned";
+}
+
+function hasExplicitOutboundMessageToolInstruction(text: string): boolean {
+  const normalized = text.toLowerCase();
+  const patterns = [
+    /\bmessage\.send\b/g,
+    /\b(?:use|call|invoke|run|trigger)\s+(?:the\s+)?message\s+tool\b/g,
+    /\b(?:send|post|deliver)\b[^\n]{0,80}\b(?:via|with|using)\b[^\n]{0,40}\bmessage(?:\.send|\s+tool)\b/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of normalized.matchAll(pattern)) {
+      const index = match.index ?? 0;
+      const before = normalized.slice(Math.max(0, index - 32), index);
+      if (/(?:do\s*not|don't|dont|avoid|instead\s+of)\s*$/.test(before)) {
+        continue;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+function assertRunnerOwnedMessageToolContract(
+  job: Pick<CronJob, "sessionTarget" | "payload" | "delivery">,
+) {
+  if (job.sessionTarget !== "isolated" || job.payload.kind !== "agentTurn") {
+    return;
+  }
+  if (resolveDeliveryContract(job.delivery) !== "runner-owned") {
+    return;
+  }
+  if (!hasExplicitOutboundMessageToolInstruction(job.payload.message)) {
+    return;
+  }
+  throw new Error(
+    'runner-owned isolated cron jobs cannot explicitly instruct outbound message-tool sends; set delivery.contract="task-owned" or remove message.send instructions',
+  );
 }
 
 export function findJobOrThrow(state: CronServiceState, id: string) {
@@ -555,6 +597,7 @@ export function createJob(state: CronServiceState, input: CronJobCreate): CronJo
   assertMainSessionAgentId(job, state.deps.defaultAgentId);
   assertDeliverySupport(job);
   assertFailureDestinationSupport(job);
+  assertRunnerOwnedMessageToolContract(job);
   job.state.nextRunAtMs = computeJobNextRunAtMs(job, now);
   return job;
 }
@@ -645,6 +688,7 @@ export function applyJobPatch(
   assertMainSessionAgentId(job, opts?.defaultAgentId);
   assertDeliverySupport(job);
   assertFailureDestinationSupport(job);
+  assertRunnerOwnedMessageToolContract(job);
 }
 
 function mergeCronPayload(existing: CronPayload, patch: CronPayloadPatch): CronPayload {
@@ -780,6 +824,7 @@ function mergeCronDelivery(
     channel: existing?.channel,
     to: existing?.to,
     accountId: existing?.accountId,
+    contract: existing?.contract,
     bestEffort: existing?.bestEffort,
     failureDestination: existing?.failureDestination,
   };
@@ -795,6 +840,16 @@ function mergeCronDelivery(
   }
   if ("accountId" in patch) {
     next.accountId = normalizeOptionalTrimmedString(patch.accountId);
+  }
+  if ("contract" in patch) {
+    const contract = normalizeOptionalTrimmedString(patch.contract)?.toLowerCase();
+    if (contract === "task-owned" || contract === "task") {
+      next.contract = "task-owned";
+    } else if (contract === "runner-owned" || contract === "runner" || contract === "cron-owned") {
+      next.contract = "runner-owned";
+    } else {
+      next.contract = undefined;
+    }
   }
   if (typeof patch.bestEffort === "boolean") {
     next.bestEffort = patch.bestEffort;

@@ -141,6 +141,7 @@ They must use `payload.kind = "systemEvent"`.
 
 - `wakeMode: "now"` (default): event triggers an immediate heartbeat run.
 - `wakeMode: "next-heartbeat"`: event waits for the next scheduled heartbeat.
+- Save-time lint: explicit embedded Discord targets like `channelId=<digits>` are checked against known session targets. Unknown ids are rejected early instead of failing later at runtime with `Unknown Channel`.
 
 This is the best fit when you want the normal heartbeat prompt + main-session context.
 See [Heartbeat](/gateway/heartbeat).
@@ -153,7 +154,7 @@ Key behaviors:
 
 - Prompt is prefixed with `[cron:<jobId> <job name>]` for traceability.
 - Each run starts a **fresh session id** (no prior conversation carry-over).
-- Default behavior: if `delivery` is omitted, isolated jobs announce a summary (`delivery.mode = "announce"`).
+- Default behavior: if `delivery` is omitted, isolated jobs announce a summary (`delivery.mode = "announce"`) in `runner-owned` contract mode.
 - `delivery.mode` chooses what happens:
   - `announce`: deliver a summary to the target channel and post a brief summary to the main session.
   - `webhook`: POST the finished event payload to `delivery.to` when the finished event includes a summary.
@@ -184,10 +185,15 @@ Delivery config:
 - `delivery.mode`: `none` | `announce` | `webhook`.
 - `delivery.channel`: `last` or a specific channel.
 - `delivery.to`: channel-specific target (announce) or webhook URL (webhook mode).
+- `delivery.contract`: `runner-owned` (default) | `task-owned`.
 - `delivery.bestEffort`: avoid failing the job if announce delivery fails.
 
-Announce delivery suppresses messaging tool sends for the run; use `delivery.channel`/`delivery.to`
-to target the chat instead. When `delivery.mode = "none"`, no summary is posted to the main session.
+Contract behavior:
+
+- `runner-owned` (default): cron runner owns user-visible announce delivery and appends a no-send footer to keep task prompts from sending directly.
+- `task-owned`: task can intentionally call `message.send`; runner skips duplicate announce if the task already sent to the same configured target.
+
+When `delivery.mode = "none"`, no summary is posted to the main session.
 
 If `delivery` is omitted for isolated jobs, OpenClaw defaults to `announce`.
 
@@ -252,6 +258,7 @@ Isolated jobs can deliver output to a channel via the top-level `delivery` confi
 - `delivery.mode`: `announce` (channel delivery), `webhook` (HTTP POST), or `none`.
 - `delivery.channel`: `whatsapp` / `telegram` / `discord` / `slack` / `mattermost` (plugin) / `signal` / `imessage` / `last`.
 - `delivery.to`: channel-specific recipient target.
+- `delivery.contract`: `runner-owned` (default) or `task-owned`.
 
 `announce` delivery is only valid for isolated jobs (`sessionTarget: "isolated"`).
 `webhook` delivery is valid for both main and isolated jobs.
