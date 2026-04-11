@@ -302,46 +302,12 @@ describe("maybeRepairLegacyCronStore", () => {
     });
   });
 
-  it("warns about stored disallowed payload.model overrides even without legacy repair work", async () => {
-    const storePath = await makeTempStorePath();
-    await writeCronStore(storePath, [
-      {
-        id: "scout-job",
-        name: "Scout job",
-        enabled: true,
-        createdAtMs: Date.parse("2026-02-01T00:00:00.000Z"),
-        updatedAtMs: Date.parse("2026-02-02T00:00:00.000Z"),
-        schedule: { kind: "every", everyMs: 60_000 },
-        sessionTarget: "isolated",
-        wakeMode: "now",
-        payload: {
-          kind: "agentTurn",
-          message: "Scout",
-          model: "openai-codex/gpt-5.2",
-        },
-        state: {},
-      },
-    ]);
-
-    resolveCronPayloadModelIssueMock.mockResolvedValueOnce({
-      model: "openai-codex/gpt-5.2",
-      reason: "not-allowed",
-      message: "cron payload.model 'openai-codex/gpt-5.2' is not allowed by policy",
-    });
-
-    const noteSpy = vi.spyOn(noteModule, "note").mockImplementation(() => {});
-    const prompter = makePrompter(false);
-
-    await maybeRepairLegacyCronStore({
-      cfg: createCronConfig(storePath),
-      options: { nonInteractive: true },
-      prompter,
-    });
-
-    expect(prompter.confirm).not.toHaveBeenCalled();
-    expect(noteSpy).toHaveBeenCalledWith(
-      expect.stringContaining("cron payload.model 'openai-codex/gpt-5.2' is not allowed by policy"),
-      "Doctor warnings",
-    );
-  });
+  // Fork patch (2026-04-11): dropped orphan test for a doctor-side warning
+  // path that was never implemented. The WIP commit added
+  // src/cron/model-override-policy.ts::resolveCronPayloadModelIssue AND this
+  // test asserting maybeRepairLegacyCronStore calls it, but never wired
+  // doctor-cron.ts itself. After the merge we took --theirs on doctor-cron.ts,
+  // which cements upstream's version with no such wiring, so the test
+  // asserted behavior that does not exist. Removed to keep the fork's
+  // doctor-cron.ts at zero divergence from upstream and stop blocking CI.
 });

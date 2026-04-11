@@ -79,29 +79,11 @@ describe("runCronIsolatedAgentTurn message tool policy", () => {
     });
   });
 
-  it("keeps the message tool enabled for task-owned delivery jobs", async () => {
-    mockFallbackPassthrough();
-    resolveCronDeliveryPlanMock.mockReturnValue({
-      requested: true,
-      mode: "announce",
-      channel: "telegram",
-      to: "123",
-    });
-
-    await runCronIsolatedAgentTurn({
-      ...makeParams(),
-      job: {
-        ...makeParams().job,
-        delivery: { mode: "announce", contract: "task-owned", channel: "telegram", to: "123" },
-      },
-    });
-
-    expect(runEmbeddedPiAgentMock).toHaveBeenCalledTimes(1);
-    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]?.disableMessageTool).toBe(false);
-    expect(runEmbeddedPiAgentMock.mock.calls[0]?.[0]?.prompt).not.toContain(
-      "note who/where it should go instead of sending it yourself",
-    );
-  });
+  // Fork patch (2026-04-11): dropped test for the `CronDeliveryContract`
+  // "task-owned" variant. That contract was part of our Apr-5 dropped patch
+  // set (upstream uses its own `cron-owned | shared` schema), so asserting
+  // the "task-owned" label here tests nothing real. Removed to stop the stale
+  // reference from blocking tsgo on every merge.
 
   it("keeps the message tool enabled for shared callers when delivery is not requested", async () => {
     mockRunCronFallbackPassthrough();
