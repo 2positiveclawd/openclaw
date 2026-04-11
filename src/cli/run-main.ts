@@ -192,12 +192,15 @@ export async function runCli(argv: string[] = process.argv) {
     // Capture all console output into structured logs while keeping stdout/stderr behavior.
     enableConsoleCapture();
 
-    const [{ buildProgram }, { installUnhandledRejectionHandler }, { restoreTerminalState }] =
-      await Promise.all([
-        import("./program.js"),
-        import("../infra/unhandled-rejections.js"),
-        import("../terminal/restore.js"),
-      ]);
+    const [
+      { buildProgram },
+      { installUnhandledRejectionHandler, isRecoverableException },
+      { restoreTerminalState },
+    ] = await Promise.all([
+      import("./program.js"),
+      import("../infra/unhandled-rejections.js"),
+      import("../terminal/restore.js"),
+    ]);
     const program = buildProgram();
 
     // Global error handlers to prevent silent crashes from unhandled rejections/exceptions.
@@ -205,6 +208,16 @@ export async function runCli(argv: string[] = process.argv) {
     installUnhandledRejectionHandler();
 
     process.on("uncaughtException", (error) => {
+      // Fork patch (2026-04-11): see src/index.ts for the rationale. Keep the
+      // two uncaughtException handlers in sync — both need to classify known
+      // recoverable exceptions so a single TLS race doesn't loop systemd.
+      if (isRecoverableException(error)) {
+        console.warn(
+          "[openclaw] Suppressed recoverable uncaught exception (continuing):",
+          formatUncaughtError(error),
+        );
+        return;
+      }
       console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
       restoreTerminalState("uncaught exception", { resumeStdinIfPaused: false });
       process.exit(1);

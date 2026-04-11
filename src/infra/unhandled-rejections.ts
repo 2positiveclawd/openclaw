@@ -337,6 +337,50 @@ export function isUnhandledRejectionHandled(reason: unknown): boolean {
 }
 
 /**
+ * Fork patch (2026-04-11): narrow matcher for undici's HTTP-socket-close TLS race.
+ *
+ * When `onHttpSocketClose` fires while a reconnect attempt is in flight, undici
+ * calls `tls.connect({ socket: <already-closed httpSocket>, session })`. Node's
+ * internal `_tls_wrap.js:TLSSocket.setSession` then tries to read the raw socket
+ * handle from the closed httpSocket, which is `null`, and throws:
+ *
+ *   TypeError: Cannot read properties of null (reading 'setSession')
+ *       at TLSSocket.setSession (node:_tls_wrap:1132:16)
+ *       at Object.connect (node:_tls_wrap:1826:13)
+ *       at Client.connect (undici/.../core/connect.js:70:20)
+ *       at TLSSocket.onHttpSocketClose (undici/.../dispatcher/client-h1.js:942:18)
+ *
+ * This exception is thrown synchronously from an EventEmitter handler so it
+ * surfaces as `uncaughtException`, not `unhandledRejection`. The dispatcher
+ * itself recovers on the next request — the crash is purely a classification
+ * miss. We therefore allow the process to keep running when we see the exact
+ * crash pattern.
+ *
+ * Safety: the match is narrow on purpose. It requires ALL of:
+ *   1. `TypeError` instance (rules out most user bugs that name themselves Error)
+ *   2. exact message `"Cannot read properties of null (reading 'setSession')"`
+ *   3. stack frame inside `_tls_wrap` (confirms it's a Node TLS internal crash)
+ *   4. stack frame inside `undici/lib/dispatcher` or named `onHttpSocketClose`
+ *      (confirms undici triggered the bad reconnect)
+ *
+ * If you break this out to a wider pattern, preserve the stack check — we do
+ * NOT want to swallow null-property TypeErrors from our own code.
+ */
+export function isUndiciTlsSessionRace(err: unknown): boolean {
+  if (!(err instanceof TypeError)) {
+    return false;
+  }
+  if (!/cannot read properties of null \(reading 'setSession'\)/i.test(err.message)) {
+    return false;
+  }
+  const stack = typeof err.stack === "string" ? err.stack : "";
+  if (!stack.includes("_tls_wrap")) {
+    return false;
+  }
+  return stack.includes("undici/lib/dispatcher") || stack.includes("onHttpSocketClose");
+}
+
+/**
  * Checks if an uncaught exception is recoverable (should not crash the gateway).
  * Covers transient network errors, Discord gateway reconnection bugs, and abort errors.
  */
@@ -351,6 +395,11 @@ export function isRecoverableException(err: unknown): boolean {
   // when Discord WebSocket connections enter zombie state. These are non-fatal;
   // the gateway will re-establish the connection on the next cycle.
   if (err instanceof Error && /reconnect.*zombie|zombie.*reconnect/i.test(err.message)) {
+    return true;
+  }
+  // Fork patch (2026-04-11): tolerate the undici onHttpSocketClose TLS race that
+  // caused a 15-hour systemd restart loop on 2026-04-10. See isUndiciTlsSessionRace.
+  if (isUndiciTlsSessionRace(err)) {
     return true;
   }
   return false;

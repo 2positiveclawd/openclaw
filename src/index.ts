@@ -3,7 +3,10 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { formatUncaughtError } from "./infra/errors.js";
 import { isMainModule } from "./infra/is-main.js";
-import { installUnhandledRejectionHandler } from "./infra/unhandled-rejections.js";
+import {
+  installUnhandledRejectionHandler,
+  isRecoverableException,
+} from "./infra/unhandled-rejections.js";
 
 type LegacyCliDeps = {
   installGaxiosFetchCompat: () => Promise<void>;
@@ -90,6 +93,18 @@ if (isMain) {
   installUnhandledRejectionHandler();
 
   process.on("uncaughtException", (error) => {
+    // Fork patch (2026-04-11): classify known-recoverable uncaught exceptions
+    // (transient network, undici TLS race, Discord zombie reconnect) and keep
+    // the process running. Upstream always exit(1)s here, which on 2026-04-10
+    // turned a single undici setSession-on-null TypeError into a ~15-hour
+    // systemd restart loop (4,637 failed restarts) with no self-recovery.
+    if (isRecoverableException(error)) {
+      console.warn(
+        "[openclaw] Suppressed recoverable uncaught exception (continuing):",
+        formatUncaughtError(error),
+      );
+      return;
+    }
     console.error("[openclaw] Uncaught exception:", formatUncaughtError(error));
     restoreTerminalState("uncaught exception", { resumeStdinIfPaused: false });
     process.exit(1);

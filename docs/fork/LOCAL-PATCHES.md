@@ -1,14 +1,14 @@
 # Local Fork Patches
 
 Minimal patches maintained in `2positiveclawd/openclaw` on top of upstream
-`openclaw/openclaw`. As of the **2026-04-05** upstream merge (9252 commits),
-the fork is deliberately kept as thin as possible — only two patches remain.
+`openclaw/openclaw`. As of the **2026-04-11** upstream merge (3250 commits),
+the fork is deliberately kept as thin as possible — three patches remain.
 
 > **Philosophy:** upstream moves fast and refactors aggressively. Every fork
 > patch you keep becomes a recurring merge tax. Unless a patch is truly
 > load-bearing for our deployment, drop it and accept upstream.
 
-## Patches (2026-04-05)
+## Patches
 
 ### 1. Azure Managed Identity Auth (CRITICAL)
 
@@ -100,6 +100,92 @@ if you actually need stealth injection (not just launch flags). Without them,
 **Enable at runtime:** set `browser.extraArgs` in `~/.openclaw/openclaw.json`
 to include `--disable-blink-features=AutomationControlled`. `isStealthEnabled()`
 detects the flag and activates the rest of the stealth path.
+
+---
+
+### 3. uncaughtException classification (2026-04-11)
+
+**Files:**
+
+- `src/infra/unhandled-rejections.ts` — add `isUndiciTlsSessionRace()` matcher
+- `src/index.ts` — wire `isRecoverableException` into the uncaughtException handler
+- `src/cli/run-main.ts` — same wiring for the CLI entry handler
+- `src/infra/unhandled-rejections.test.ts` — 6 new narrow-match assertions
+
+**Why:** on 2026-04-10 the gateway hit an undici `onHttpSocketClose` TLS race:
+
+```
+TypeError: Cannot read properties of null (reading 'setSession')
+    at TLSSocket.setSession (node:_tls_wrap:1132:16)
+    at Object.connect (node:_tls_wrap:1826:13)
+    at Client.connect (undici/lib/core/connect.js:70:20)
+    at TLSSocket.onHttpSocketClose (undici/lib/dispatcher/client-h1.js:942:18)
+```
+
+This is a synchronous throw from an EventEmitter (`emit('close', …)`), so it
+surfaces as `uncaughtException`, not `unhandledRejection`. Upstream's
+`src/index.ts:92` and `src/cli/run-main.ts:207` both always `console.error +
+process.exit(1)` on `uncaughtException`, which meant a single TLS race plus
+systemd's 5 s restart loop spun the gateway through **4,637 failed restarts**
+over ~15 hours, ending only when a subsequent upstream merge happened to
+rebuild `dist/` through our work.
+
+Notably, `isRecoverableException()` already exists in `src/infra/unhandled-rejections.ts:343`
+— upstream wrote it, but it is **not** wired into the uncaughtException path.
+It is currently only consulted for `unhandledRejection`.
+
+**What the patch adds:**
+
+- `isUndiciTlsSessionRace(err)` — narrow matcher requiring all of:
+  1. `err instanceof TypeError`
+  2. `err.message` matches `cannot read properties of null \(reading 'setSession'\)`
+  3. stack includes `_tls_wrap` (Node internal TLS)
+  4. stack includes `undici/lib/dispatcher` or `onHttpSocketClose`
+- Extends `isRecoverableException()` to return true for that matcher.
+- Updates both `uncaughtException` handlers to consult `isRecoverableException`
+  first and, on match, log a `[openclaw] Suppressed recoverable uncaught
+exception (continuing): …` warn line and return instead of exiting.
+
+**Why it is safe:**
+
+- The matcher is narrow on purpose: an unrelated `null.setSession` TypeError
+  from our own code will not match because the stack check fails. Generic
+  `TypeError`s and plain `Error`s with the same message also do not match.
+- Suppressed events are still logged at WARN level (visible in journalctl),
+  so operator can count them and notice abuse.
+- Fatal classifications (`isFatalError`, `isConfigError`) are unaffected —
+  they live in the `unhandledRejection` handler, not this path.
+- `isTransientNetworkError` and the Discord zombie-reconnect rule already
+  existed in upstream's `isRecoverableException`; we did not change their
+  semantics, only the call site.
+
+**Re-apply after merge conflict:**
+
+1. Find `isRecoverableException` in `src/infra/unhandled-rejections.ts`. Add
+   the `isUndiciTlsSessionRace` helper just above it (or verify it still
+   exists) and add a call to it at the end of `isRecoverableException` before
+   the final `return false`.
+2. In `src/index.ts` and `src/cli/run-main.ts` find the `process.on("uncaughtException", …)`
+   blocks and prepend an `if (isRecoverableException(error)) { console.warn(…); return; }`
+   check. Make sure `isRecoverableException` is imported from
+   `./infra/unhandled-rejections.js` (src/index.ts) or
+   `../infra/unhandled-rejections.js` (src/cli/run-main.ts — lazy inside
+   `Promise.all`, same destructure as `installUnhandledRejectionHandler`).
+3. Update the test file `src/infra/unhandled-rejections.test.ts` to import
+   `isRecoverableException` and `isUndiciTlsSessionRace` and keep the
+   `describe("isUndiciTlsSessionRace")` block — the crash-stack fixture inside
+   it is the verbatim 2026-04-10 crash.
+
+**Test:** `pnpm test src/infra/unhandled-rejections.test.ts` — expect the
+`isUndiciTlsSessionRace` block (6 assertions) plus the pre-existing 40 to all
+pass. Full-repo build: `pnpm build`.
+
+**If the matcher stops firing:** either Node renamed `_tls_wrap`, undici
+renamed `onHttpSocketClose` / moved `client-h1.js` out of `lib/dispatcher/`,
+or the bug finally got fixed upstream. Update the stack-frame checks in
+`isUndiciTlsSessionRace` to match the new names — or, if the bug is gone,
+delete the matcher entirely. Do NOT widen the matcher: we do not want to
+swallow user-code null-property reads.
 
 ---
 
@@ -211,12 +297,17 @@ pnpm build
 grep -n "fetchAzureManagedIdentityToken\|azure-managed-identity" src/agents/model-auth.ts
 grep -n "isStealthEnabled\|getStealthLaunchArgs" extensions/browser/src/browser/chrome.ts
 grep -n "applyStealthToContext" extensions/browser/src/browser/pw-session.ts
+grep -n "isUndiciTlsSessionRace\|isRecoverableException" src/infra/unhandled-rejections.ts
+grep -n "isRecoverableException" src/index.ts src/cli/run-main.ts
 
 # 3. No references to dropped patches should remain
 grep -rn "extension-bridge\|runner-owned\|CronDeliveryContract" src/ extensions/ 2>&1 | head
 # (should be empty)
 
-# 4. Restart the gateway and confirm Azure auth works
+# 4. Narrow tests for the uncaughtException classifier
+pnpm test src/infra/unhandled-rejections.test.ts
+
+# 5. Restart the gateway and confirm Azure auth works
 systemctl --user restart openclaw-gateway
 journalctl --user -u openclaw-gateway -f
 ```

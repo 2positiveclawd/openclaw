@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   isAbortError,
+  isRecoverableException,
   isTransientNetworkError,
   isTransientSqliteError,
   isTransientUnhandledRejectionError,
+  isUndiciTlsSessionRace,
 } from "./unhandled-rejections.js";
 
 describe("isAbortError", () => {
@@ -266,5 +268,71 @@ describe("isTransientUnhandledRejectionError", () => {
     });
 
     expect(isTransientUnhandledRejectionError(error)).toBe(true);
+  });
+});
+
+// Fork patch (2026-04-11): matcher for the undici HTTP-socket-close TLS race.
+// The real 2026-04-10 crash stack is reproduced verbatim below — update the
+// fixture, not the matcher, if undici renames files or frames.
+describe("isUndiciTlsSessionRace", () => {
+  const realCrashStack = [
+    "TypeError: Cannot read properties of null (reading 'setSession')",
+    "    at TLSSocket.setSession (node:_tls_wrap:1132:16)",
+    "    at Object.connect (node:_tls_wrap:1826:13)",
+    "    at Client.connect (/home/azureuser/openclaw/node_modules/.pnpm/undici@7.22.0/node_modules/undici/lib/core/connect.js:70:20)",
+    "    at connect (/home/azureuser/openclaw/node_modules/.pnpm/undici@7.22.0/node_modules/undici/lib/dispatcher/client.js:452:21)",
+    "    at _resume (/home/azureuser/openclaw/node_modules/.pnpm/undici@7.22.0/node_modules/undici/lib/dispatcher/client.js:627:7)",
+    "    at resume (/home/azureuser/openclaw/node_modules/.pnpm/undici@7.22.0/node_modules/undici/lib/dispatcher/client.js:561:3)",
+    "    at Client.<computed> (/home/azureuser/openclaw/node_modules/.pnpm/undici@7.22.0/node_modules/undici/lib/dispatcher/client.js:285:31)",
+    "    at TLSSocket.onHttpSocketClose (/home/azureuser/openclaw/node_modules/.pnpm/undici@7.22.0/node_modules/undici/lib/dispatcher/client-h1.js:942:18)",
+    "    at TLSSocket.emit (node:events:531:35)",
+    "    at node:net:346:12",
+    "    at TCP.done (node:_tls_wrap:667:7)",
+  ].join("\n");
+
+  function buildRealCrash(): TypeError {
+    const err = new TypeError("Cannot read properties of null (reading 'setSession')");
+    err.stack = realCrashStack;
+    return err;
+  }
+
+  it("matches the real 2026-04-10 undici onHttpSocketClose crash", () => {
+    expect(isUndiciTlsSessionRace(buildRealCrash())).toBe(true);
+  });
+
+  it("returns true inside isRecoverableException", () => {
+    expect(isRecoverableException(buildRealCrash())).toBe(true);
+  });
+
+  it("does not match generic TypeError with same message but unrelated stack", () => {
+    const err = new TypeError("Cannot read properties of null (reading 'setSession')");
+    err.stack = `${err.message}\n    at Object.<anonymous> (/home/azureuser/openclaw/src/some-unrelated.ts:42:10)`;
+    expect(isUndiciTlsSessionRace(err)).toBe(false);
+  });
+
+  it("does not match undici-stack TypeError with a different message", () => {
+    const err = new TypeError("Cannot read properties of null (reading 'end')");
+    err.stack = [
+      err.message,
+      "    at TLSSocket.foo (node:_tls_wrap:99:1)",
+      "    at TLSSocket.onHttpSocketClose (undici/lib/dispatcher/client-h1.js:942:18)",
+    ].join("\n");
+    expect(isUndiciTlsSessionRace(err)).toBe(false);
+  });
+
+  it("does not match a plain Error with matching message (not a TypeError)", () => {
+    const err = new Error("Cannot read properties of null (reading 'setSession')");
+    err.stack = realCrashStack;
+    expect(isUndiciTlsSessionRace(err)).toBe(false);
+  });
+
+  it("does not match a setSession TypeError outside undici (only _tls_wrap)", () => {
+    const err = new TypeError("Cannot read properties of null (reading 'setSession')");
+    err.stack = [
+      err.message,
+      "    at TLSSocket.setSession (node:_tls_wrap:1132:16)",
+      "    at Object.<anonymous> (/home/azureuser/openclaw/src/custom-tls.ts:10:5)",
+    ].join("\n");
+    expect(isUndiciTlsSessionRace(err)).toBe(false);
   });
 });

@@ -106,7 +106,7 @@ The OpenClaw fork code at `/home/azureuser/openclaw/` is kept as reference for t
 
 > **Full documentation:** See `docs/fork/LOCAL-PATCHES.md` for the complete merge workflow, conflict strategy, and footguns.
 
-After the 2026-04-05 merge we keep the fork as thin as possible. Only two patches remain — everything else tracks upstream exactly.
+After the 2026-04-11 merge we keep the fork as thin as possible. Three patches remain — everything else tracks upstream exactly.
 
 ### 1. Azure Managed Identity auth — `src/agents/model-auth.ts`
 
@@ -114,7 +114,7 @@ Our VM authenticates to Azure OpenAI via IMDS (no API keys on disk). Upstream ha
 
 - `fetchAzureManagedIdentityToken()` + token cache
 - `isAzureProvider(provider)` (uses upstream `normalizeProviderId`)
-- Integration inside `resolveApiKeyForProvider`, right after the amazon-bedrock branch, returning `{ apiKey: token, source: "azure-managed-identity", mode: "token" }`
+- Integration inside `resolveApiKeyForProvider`, placed late in the function (after profile/env/config resolution) so explicit keys still win. Returns `{ apiKey: token, source: "azure-managed-identity", mode: "token" }` on IMDS success.
 
 ### 2. Browser stealth — `extensions/browser/src/browser/{stealth,chrome,pw-session}.ts`
 
@@ -126,9 +126,18 @@ Anti-bot detection bypass for browser automation.
 
 Enable at runtime by adding `--disable-blink-features=AutomationControlled` to `browser.extraArgs` in `~/.openclaw/openclaw.json`.
 
+### 3. uncaughtException classification — `src/infra/unhandled-rejections.ts` + `src/index.ts` + `src/cli/run-main.ts`
+
+Prevents 15-hour systemd restart loops from single transient crashes. On 2026-04-10 a single undici `onHttpSocketClose` TLS race (`TypeError: Cannot read properties of null (reading 'setSession')` from `node:_tls_wrap:1132`) killed the gateway, and because upstream's `uncaughtException` handler always `process.exit(1)`s, systemd spun through 4,637 failed restarts overnight.
+
+- `isUndiciTlsSessionRace(err)` narrow matcher in `src/infra/unhandled-rejections.ts` — requires `TypeError` name, exact `setSession` null-read message, `_tls_wrap` frame, and `undici/lib/dispatcher` / `onHttpSocketClose` frame. Will not swallow user-code null-property reads.
+- Added to `isRecoverableException()` (upstream wrote this function but never wired it into the uncaughtException path).
+- Both `process.on("uncaughtException", …)` handlers (`src/index.ts`, `src/cli/run-main.ts`) now consult `isRecoverableException` first and, on match, log `[openclaw] Suppressed recoverable uncaught exception (continuing): …` at warn level and return instead of exiting.
+- 6 narrow test assertions in `src/infra/unhandled-rejections.test.ts` (includes the verbatim 2026-04-10 crash stack as a fixture).
+
 ### Dropped in 2026-04-05 (do NOT re-add)
 
-Extension bridge pattern + fork extensions (goal-loop, planner, researcher, trend-scout), `CronDeliveryContract` runner-owned/task-owned work, `isRecoverableException` + uncaughtException classifier. All dropped in favor of upstream equivalents or because they depended on paths upstream moved. See `docs/fork/LOCAL-PATCHES.md` for the full rationale.
+Extension bridge pattern + fork extensions (goal-loop, planner, researcher, trend-scout), `CronDeliveryContract` runner-owned/task-owned work. All dropped in favor of upstream equivalents or because they depended on paths upstream moved. See `docs/fork/LOCAL-PATCHES.md` for the full rationale. Note: upstream's `isRecoverableException` function was kept when we dropped our fork version, but upstream left it unwired from the uncaughtException path — patch #3 re-wires it.
 
 ## Project Structure & Module Organization
 
