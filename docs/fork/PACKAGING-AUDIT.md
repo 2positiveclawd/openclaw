@@ -130,11 +130,11 @@ Formerly mixed into `src/discord/` (core code). **Refactored 2026-02-05:** Butto
 
 ### Remaining Fork Files
 
-| File                              | Change                                                        | Lines                           |
-| --------------------------------- | ------------------------------------------------------------- | ------------------------------- |
-| `src/discord/monitor/provider.ts` | Uses `drainDiscordComponentFactories()` for extension buttons | +3 (generic, not fork-specific) |
-| `src/discord/resolve-channels.ts` | Minor additions                                               | +4                              |
-| `scripts/scout-notify.ts`         | Standalone script to send pending proposals to Discord        | ~146                            |
+| File                              | Change                                                                                                         | Lines                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| `src/discord/monitor/provider.ts` | Uses `drainDiscordComponentFactories()` for extension buttons                                                  | +3 (generic, not fork-specific) |
+| `src/discord/resolve-channels.ts` | Minor additions                                                                                                | +4                              |
+| `scripts/scout-notify.ts`         | Standalone Node+tsx notifier for pending Scout proposals (self-contained via `scripts/lib/scout-proposals.ts`) | ~146                            |
 
 ### Pattern
 
@@ -176,9 +176,9 @@ Extensions register `DiscordButtonSpec` objects via `registerDiscordButton()` du
 
 ### Custom Scripts
 
-| File                      | Purpose                         |
-| ------------------------- | ------------------------------- |
-| `scripts/scout-notify.ts` | Send Scout proposals to Discord |
+| File                      | Purpose                                                                       |
+| ------------------------- | ----------------------------------------------------------------------------- |
+| `scripts/scout-notify.ts` | Send Scout proposals to Discord (`node --import tsx scripts/scout-notify.ts`) |
 
 **Conflict risk: NONE** — new files.
 

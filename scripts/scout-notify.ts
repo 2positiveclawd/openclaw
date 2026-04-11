@@ -7,18 +7,102 @@
 // sends pending proposals to Discord with interactive buttons, and updates
 // the registry with message IDs.
 //
-// Usage: bun scripts/scout-notify.ts
-//    or: node --import tsx scripts/scout-notify.ts
+// Usage: node --import tsx scripts/scout-notify.ts
+//    or: bun scripts/scout-notify.ts
 
 import { ButtonStyle, Routes } from "discord-api-types/v10";
+import { readBestEffortConfig } from "../src/config/config.js";
 import {
   buildScoutProposalCustomId,
   readRegistry,
-  writeRegistry,
   type ScoutProposal,
-} from "../extensions/trend-scout/src/discord-buttons.js";
-import { loadConfig } from "../src/config/config.js";
-import { createDiscordClient } from "../src/discord/send.shared.js";
+  writeRegistry,
+} from "./lib/scout-proposals.js";
+
+// ---------------------------------------------------------------------------
+// Config + Discord HTTP helpers
+// ---------------------------------------------------------------------------
+
+function readSecretValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.length > 0) {
+    return value;
+  }
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.value === "string" && candidate.value.length > 0) {
+    return candidate.value;
+  }
+  if (typeof candidate.plaintext === "string" && candidate.plaintext.length > 0) {
+    return candidate.plaintext;
+  }
+  return undefined;
+}
+
+function resolveDiscordToken(cfg: unknown): string | undefined {
+  if (!cfg || typeof cfg !== "object") {
+    return undefined;
+  }
+
+  const root = cfg as Record<string, unknown>;
+  const channels = root.channels;
+  if (!channels || typeof channels !== "object") {
+    return undefined;
+  }
+
+  const discord = (channels as Record<string, unknown>).discord;
+  if (!discord || typeof discord !== "object") {
+    return undefined;
+  }
+
+  const discordConfig = discord as Record<string, unknown>;
+  const rootToken = readSecretValue(discordConfig.token) ?? readSecretValue(discordConfig.botToken);
+  if (rootToken) {
+    return rootToken;
+  }
+
+  const accounts = discordConfig.accounts;
+  if (!accounts || typeof accounts !== "object") {
+    return undefined;
+  }
+
+  for (const account of Object.values(accounts as Record<string, unknown>)) {
+    if (!account || typeof account !== "object") {
+      continue;
+    }
+    const accountConfig = account as Record<string, unknown>;
+    const accountToken =
+      readSecretValue(accountConfig.token) ?? readSecretValue(accountConfig.botToken);
+    if (accountToken) {
+      return accountToken;
+    }
+  }
+
+  return undefined;
+}
+
+async function sendDiscordMessage(
+  channelId: string,
+  token: string,
+  body: { content: string; components: ReturnType<typeof buildButtonComponents> },
+): Promise<{ id: string } | null> {
+  const response = await fetch(`https://discord.com/api/v10${Routes.channelMessages(channelId)}`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bot ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = (await response.text().catch(() => "")) || "unknown error";
+    throw new Error(`Discord API ${response.status}: ${errorText.slice(0, 600)}`);
+  }
+
+  return (await response.json()) as { id: string };
+}
 
 // ---------------------------------------------------------------------------
 // Message formatting
@@ -93,8 +177,12 @@ async function main() {
 
   console.log(`scout-notify: ${toSend.length} proposal(s) to send`);
 
-  const cfg = loadConfig();
-  const { rest, request } = createDiscordClient({}, cfg);
+  const cfg = await readBestEffortConfig();
+  const discordToken = resolveDiscordToken(cfg);
+
+  if (!discordToken) {
+    throw new Error("Discord token is missing in channels.discord token/botToken config");
+  }
 
   for (const proposal of toSend) {
     const channelId = proposal.channelId;
@@ -107,13 +195,10 @@ async function main() {
       const content = formatProposalMessage(proposal);
       const components = buildButtonComponents(proposal.id);
 
-      const message = (await request(
-        () =>
-          rest.post(Routes.channelMessages(channelId), {
-            body: { content, components },
-          }) as Promise<{ id: string }>,
-        "scout-notify",
-      )) as { id: string } | null;
+      const message = await sendDiscordMessage(channelId, discordToken, {
+        content,
+        components,
+      });
 
       if (!message?.id) {
         console.error(`scout-notify: failed to send proposal ${proposal.id} — no message ID`);

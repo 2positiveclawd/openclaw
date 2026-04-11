@@ -4,6 +4,16 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import * as noteModule from "../terminal/note.js";
+
+const resolveCronPayloadModelIssueMock = vi.hoisted(() => vi.fn(async () => null));
+
+vi.mock("../cron/model-override-policy.js", () => ({
+  resolveCronPayloadModelIssue: (...args: unknown[]) =>
+    (resolveCronPayloadModelIssueMock as unknown as (...innerArgs: unknown[]) => Promise<unknown>)(
+      ...args,
+    ),
+}));
+
 import { maybeRepairLegacyCronStore } from "./doctor-cron.js";
 
 let tempRoot: string | null = null;
@@ -15,6 +25,8 @@ async function makeTempStorePath() {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  resolveCronPayloadModelIssueMock.mockReset();
+  resolveCronPayloadModelIssueMock.mockResolvedValue(null);
   if (tempRoot) {
     await fs.rm(tempRoot, { recursive: true, force: true });
     tempRoot = null;
@@ -288,5 +300,48 @@ describe("maybeRepairLegacyCronStore", () => {
       to: "-1001234567890",
       threadId: "99",
     });
+  });
+
+  it("warns about stored disallowed payload.model overrides even without legacy repair work", async () => {
+    const storePath = await makeTempStorePath();
+    await writeCronStore(storePath, [
+      {
+        id: "scout-job",
+        name: "Scout job",
+        enabled: true,
+        createdAtMs: Date.parse("2026-02-01T00:00:00.000Z"),
+        updatedAtMs: Date.parse("2026-02-02T00:00:00.000Z"),
+        schedule: { kind: "every", everyMs: 60_000 },
+        sessionTarget: "isolated",
+        wakeMode: "now",
+        payload: {
+          kind: "agentTurn",
+          message: "Scout",
+          model: "openai-codex/gpt-5.2",
+        },
+        state: {},
+      },
+    ]);
+
+    resolveCronPayloadModelIssueMock.mockResolvedValueOnce({
+      model: "openai-codex/gpt-5.2",
+      reason: "not-allowed",
+      message: "cron payload.model 'openai-codex/gpt-5.2' is not allowed by policy",
+    });
+
+    const noteSpy = vi.spyOn(noteModule, "note").mockImplementation(() => {});
+    const prompter = makePrompter(false);
+
+    await maybeRepairLegacyCronStore({
+      cfg: createCronConfig(storePath),
+      options: { nonInteractive: true },
+      prompter,
+    });
+
+    expect(prompter.confirm).not.toHaveBeenCalled();
+    expect(noteSpy).toHaveBeenCalledWith(
+      expect.stringContaining("cron payload.model 'openai-codex/gpt-5.2' is not allowed by policy"),
+      "Doctor warnings",
+    );
   });
 });

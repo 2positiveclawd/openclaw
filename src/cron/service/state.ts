@@ -44,6 +44,8 @@ export type CronServiceDeps = {
   cronConfig?: CronConfig;
   /** Default agent id for jobs without an agent id. */
   defaultAgentId?: string;
+  /** Optional save-time validation hook for cron jobs. Throw to reject add/edit. */
+  validateJobBeforeSave?: (job: CronJob) => Promise<void> | void;
   /** Resolve session store path for a given agent id. */
   resolveSessionStorePath?: (agentId?: string) => string;
   /** Path to the session store (sessions.json) for reaper use. */

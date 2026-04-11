@@ -85,10 +85,11 @@ running, OpenClaw suppresses that partial parent update instead of announcing it
 - `--tools exec,read`: restrict which tools the job can use
 
 `--model` uses the selected allowed model for that job. If the requested model
-is not allowed, cron logs a warning and falls back to the job's agent/default
-model selection instead. Configured fallback chains still apply, but a plain
-model override with no explicit per-job fallback list no longer appends the
-agent primary as a hidden extra retry target.
+is not allowed, cron now rejects the add/edit request, and stored bad overrides
+also fail explicitly at runtime until you remove or fix them. Configured
+fallback chains still apply, but a plain model override with no explicit
+per-job fallback list no longer appends the agent primary as a hidden extra
+retry target.
 
 Model-selection precedence for isolated jobs is:
 
@@ -328,8 +329,9 @@ Model override note:
 - `openclaw cron add|edit --model ...` changes the job's selected model.
 - If the model is allowed, that exact provider/model reaches the isolated agent
   run.
-- If it is not allowed, cron warns and falls back to the job's agent/default
-  model selection.
+- If it is not allowed, cron rejects the save request. If an older stored job
+  still carries a now-disallowed override, the run fails explicitly until you
+  remove or fix `payload.model`.
 - Configured fallback chains still apply, but a plain `--model` override with
   no explicit per-job fallback list no longer falls through to the agent
   primary as a silent extra retry target.
@@ -359,6 +361,8 @@ Disable cron: `cron.enabled: false` or `OPENCLAW_SKIP_CRON=1`.
 **One-shot retry**: transient errors (rate limit, overload, network, server error) retry up to 3 times with exponential backoff. Permanent errors disable immediately.
 
 **Recurring retry**: exponential backoff (30s to 60m) between retries. Backoff resets after the next successful run.
+
+**Recurring main-session permanent errors**: recurring main-session jobs now auto-disable after 2 consecutive permanent target-resolution run errors, such as `Unknown Channel` or `Target channel could not be resolved`, instead of backing off forever.
 
 **Maintenance**: `cron.sessionRetention` (default `24h`) prunes isolated run-session entries. `cron.runLog.maxBytes` / `cron.runLog.keepLines` auto-prune run-log files.
 

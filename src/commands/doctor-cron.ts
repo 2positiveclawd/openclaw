@@ -1,5 +1,6 @@
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
+import { resolveCronPayloadModelIssue } from "../cron/model-override-policy.js";
 import { resolveCronStorePath, loadCronStore, saveCronStore } from "../cron/store.js";
 import type { CronJob } from "../cron/types.js";
 import { note } from "../terminal/note.js";
@@ -57,6 +58,24 @@ function formatLegacyIssuePreview(issues: Partial<Record<string, number>>): stri
 
 function trimString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+async function collectCronPayloadModelWarnings(params: { cfg: OpenClawConfig; jobs: CronJob[] }) {
+  const warnings: string[] = [];
+  for (const job of params.jobs) {
+    const issue = await resolveCronPayloadModelIssue({
+      cfg: params.cfg,
+      job,
+    });
+    if (!issue) {
+      continue;
+    }
+    const jobName = trimString(job.name) ?? trimString(job.id) ?? "<unnamed>";
+    warnings.push(
+      `${issue.message}. Stored on cron job "${jobName}". Remove payload.model to use agent defaults before the next run.`,
+    );
+  }
+  return warnings;
 }
 
 function migrateLegacyNotifyFallback(params: {
@@ -134,29 +153,42 @@ export async function maybeRepairLegacyCronStore(params: {
   const legacyWebhook = trimString(params.cfg.cron?.webhook);
   const notifyCount = rawJobs.filter((job) => job.notify === true).length;
   const previewLines = formatLegacyIssuePreview(normalized.issues);
+  const payloadModelWarnings = await collectCronPayloadModelWarnings({
+    cfg: params.cfg,
+    jobs: rawJobs as unknown as CronJob[],
+  });
   if (notifyCount > 0) {
     previewLines.push(
       `- ${pluralize(notifyCount, "job")} still uses legacy \`notify: true\` webhook fallback`,
     );
   }
-  if (previewLines.length === 0) {
+  if (previewLines.length > 0) {
+    note(
+      [
+        `Legacy cron job storage detected at ${shortenHomePath(storePath)}.`,
+        ...previewLines,
+        `Repair with ${formatCliCommand("openclaw doctor --fix")} to normalize the store before the next scheduler run.`,
+      ].join("\n"),
+      "Cron",
+    );
+  }
+  if (previewLines.length === 0 && payloadModelWarnings.length === 0) {
     return;
   }
 
-  note(
-    [
-      `Legacy cron job storage detected at ${shortenHomePath(storePath)}.`,
-      ...previewLines,
-      `Repair with ${formatCliCommand("openclaw doctor --fix")} to normalize the store before the next scheduler run.`,
-    ].join("\n"),
-    "Cron",
-  );
+  if (previewLines.length === 0) {
+    note(payloadModelWarnings.join("\n"), "Doctor warnings");
+    return;
+  }
 
   const shouldRepair = await params.prompter.confirm({
     message: "Repair legacy cron jobs now?",
     initialValue: true,
   });
   if (!shouldRepair) {
+    if (payloadModelWarnings.length > 0) {
+      note(payloadModelWarnings.join("\n"), "Doctor warnings");
+    }
     return;
   }
 
@@ -177,7 +209,8 @@ export async function maybeRepairLegacyCronStore(params: {
     note(`Cron store normalized at ${shortenHomePath(storePath)}.`, "Doctor changes");
   }
 
-  if (notifyMigration.warnings.length > 0) {
-    note(notifyMigration.warnings.join("\n"), "Doctor warnings");
+  const warnings = [...notifyMigration.warnings, ...payloadModelWarnings];
+  if (warnings.length > 0) {
+    note(warnings.join("\n"), "Doctor warnings");
   }
 }

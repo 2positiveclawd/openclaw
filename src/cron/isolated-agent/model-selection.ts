@@ -112,12 +112,10 @@ export async function resolveCronModelSelection(
       defaultModel: resolvedDefault.model,
     });
     if ("error" in resolvedOverride) {
-      if (resolvedOverride.error.startsWith("model not allowed:")) {
+      if (resolvedOverride.error.toLowerCase().startsWith("model not allowed:")) {
         return {
-          ok: true,
-          provider,
-          model,
-          warning: `cron: payload.model '${modelOverride}' not allowed, falling back to agent defaults`,
+          ok: false,
+          error: `cron: payload.model '${modelOverride}' is not allowed by policy. Remove payload.model to use agent defaults.`,
         };
       }
       return { ok: false, error: resolvedOverride.error };

@@ -261,6 +261,7 @@ export async function add(state: CronServiceState, input: CronJobCreate) {
     warnIfDisabled(state, "add");
     await ensureLoaded(state);
     const job = createJob(state, input);
+    await state.deps.validateJobBeforeSave?.(job);
     state.store?.jobs.push(job);
 
     // Defensive: recompute all next-run times to ensure consistency
@@ -295,6 +296,10 @@ export async function update(state: CronServiceState, id: string, patch: CronJob
     warnIfDisabled(state, "update");
     await ensureLoaded(state, { skipRecompute: true });
     const job = findJobOrThrow(state, id);
+    const candidate = structuredClone(job);
+    applyJobPatch(candidate, patch, { defaultAgentId: state.deps.defaultAgentId });
+    await state.deps.validateJobBeforeSave?.(candidate);
+
     const now = state.deps.nowMs();
     applyJobPatch(job, patch, { defaultAgentId: state.deps.defaultAgentId });
     if (job.schedule.kind === "every") {

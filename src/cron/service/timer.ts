@@ -251,6 +251,41 @@ function resolveRetryConfig(cronConfig?: CronConfig) {
   };
 }
 
+/** Consecutive permanent recurring run errors before auto-disable. */
+const RECURRING_PERMANENT_RUN_ERROR_DISABLE_AFTER = 2;
+
+const RECURRING_MAIN_RUN_PERMANENT_ERROR_PATTERNS = [
+  /\bunknown channel\b/i,
+  /\btarget channel could not be resolved\b/i,
+  /\bchat not found\b/i,
+  /\bcould not resolve (?:target|channel)\b/i,
+] as const;
+
+function isRecurringMainPermanentRunError(job: CronJob, error: string | undefined): boolean {
+  if (job.schedule.kind === "at" || job.sessionTarget !== "main") {
+    return false;
+  }
+  if (!error || typeof error !== "string") {
+    return false;
+  }
+  return RECURRING_MAIN_RUN_PERMANENT_ERROR_PATTERNS.some((pattern) => pattern.test(error));
+}
+
+function shouldDisableRecurringMainJobAfterPermanentRunError(params: {
+  job: CronJob;
+  currentError: string | undefined;
+  previousError: string | undefined;
+}): boolean {
+  if (!isRecurringMainPermanentRunError(params.job, params.currentError)) {
+    return false;
+  }
+  const consecutiveErrors = params.job.state.consecutiveErrors ?? 0;
+  if (consecutiveErrors < RECURRING_PERMANENT_RUN_ERROR_DISABLE_AFTER) {
+    return false;
+  }
+  return isRecurringMainPermanentRunError(params.job, params.previousError);
+}
+
 function resolveDeliveryStatus(params: { job: CronJob; delivered?: boolean }): CronDeliveryStatus {
   if (params.delivered === true) {
     return "delivered";
@@ -377,6 +412,43 @@ function emitFailureAlert(
   }
 }
 
+function autoDisableRecurringMainJobAfterPermanentRunError(
+  state: CronServiceState,
+  params: { job: CronJob; error?: string },
+): void {
+  const { job } = params;
+  const consecutiveErrors = job.state.consecutiveErrors ?? 0;
+  job.enabled = false;
+  job.state.nextRunAtMs = undefined;
+
+  state.deps.log.warn(
+    {
+      jobId: job.id,
+      jobName: job.name,
+      consecutiveErrors,
+      error: params.error,
+    },
+    "cron: auto-disabled recurring main-session job after repeated permanent run errors",
+  );
+
+  const safeJobName = job.name || job.id;
+  const truncatedError = (params.error?.trim() || "unknown error").slice(0, 200);
+  const notifyText =
+    `⚠️ Cron job "${safeJobName}" has been auto-disabled after ${consecutiveErrors} ` +
+    `consecutive permanent run errors. Last error: ${truncatedError}`;
+
+  state.deps.enqueueSystemEvent(notifyText, {
+    agentId: job.agentId,
+    sessionKey: job.sessionKey,
+    contextKey: `cron:${job.id}:auto-disabled-permanent-run-error`,
+  });
+  state.deps.requestHeartbeatNow({
+    reason: `cron:${job.id}:auto-disabled-permanent-run-error`,
+    agentId: job.agentId,
+    sessionKey: job.sessionKey,
+  });
+}
+
 /**
  * Apply the result of a job execution to the job's state.
  * Handles consecutive error tracking, exponential backoff, one-shot disable,
@@ -398,6 +470,7 @@ export function applyJobResult(
   },
 ): boolean {
   const prevLastRunAtMs = job.state.lastRunAtMs;
+  const previousLastError = job.state.lastError;
   const computeNextWithPreservedLastRun = (nowMs: number) => {
     const saved = job.state.lastRunAtMs;
     job.state.lastRunAtMs = prevLastRunAtMs;
@@ -502,33 +575,43 @@ export function applyJobResult(
         }
       }
     } else if (result.status === "error" && isJobEnabled(job)) {
-      // Apply exponential backoff for errored jobs to prevent retry storms.
-      const backoff = errorBackoffMs(job.state.consecutiveErrors ?? 1);
-      let normalNext: number | undefined;
-      try {
-        normalNext =
-          opts?.preserveSchedule && job.schedule.kind === "every"
-            ? computeNextWithPreservedLastRun(result.endedAt)
-            : computeJobNextRunAtMs(job, result.endedAt);
-      } catch (err) {
-        // If the schedule expression/timezone throws (croner edge cases),
-        // record the schedule error (auto-disables after repeated failures)
-        // and fall back to backoff-only schedule so the state update is not lost.
-        recordScheduleComputeError({ state, job, err });
+      if (
+        shouldDisableRecurringMainJobAfterPermanentRunError({
+          job,
+          currentError: result.error,
+          previousError: previousLastError,
+        })
+      ) {
+        autoDisableRecurringMainJobAfterPermanentRunError(state, { job, error: result.error });
+      } else {
+        // Apply exponential backoff for errored jobs to prevent retry storms.
+        const backoff = errorBackoffMs(job.state.consecutiveErrors ?? 1);
+        let normalNext: number | undefined;
+        try {
+          normalNext =
+            opts?.preserveSchedule && job.schedule.kind === "every"
+              ? computeNextWithPreservedLastRun(result.endedAt)
+              : computeJobNextRunAtMs(job, result.endedAt);
+        } catch (err) {
+          // If the schedule expression/timezone throws (croner edge cases),
+          // record the schedule error (auto-disables after repeated failures)
+          // and fall back to backoff-only schedule so the state update is not lost.
+          recordScheduleComputeError({ state, job, err });
+        }
+        const backoffNext = result.endedAt + backoff;
+        // Use whichever is later: the natural next run or the backoff delay.
+        job.state.nextRunAtMs =
+          normalNext !== undefined ? Math.max(normalNext, backoffNext) : backoffNext;
+        state.deps.log.info(
+          {
+            jobId: job.id,
+            consecutiveErrors: job.state.consecutiveErrors,
+            backoffMs: backoff,
+            nextRunAtMs: job.state.nextRunAtMs,
+          },
+          "cron: applying error backoff",
+        );
       }
-      const backoffNext = result.endedAt + backoff;
-      // Use whichever is later: the natural next run or the backoff delay.
-      job.state.nextRunAtMs =
-        normalNext !== undefined ? Math.max(normalNext, backoffNext) : backoffNext;
-      state.deps.log.info(
-        {
-          jobId: job.id,
-          consecutiveErrors: job.state.consecutiveErrors,
-          backoffMs: backoff,
-          nextRunAtMs: job.state.nextRunAtMs,
-        },
-        "cron: applying error backoff",
-      );
     } else if (isJobEnabled(job)) {
       let naturalNext: number | undefined;
       try {

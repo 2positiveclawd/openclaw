@@ -35,7 +35,7 @@ an explicit persistent session key.
 Note: for one-shot CLI jobs, offset-less `--at` datetimes are treated as UTC unless you also pass
 `--tz <iana>`, which interprets that local wall-clock time in the given timezone.
 
-Note: recurring jobs now use exponential retry backoff after consecutive errors (30s → 1m → 5m → 15m → 60m), then return to normal schedule after the next successful run.
+Note: recurring jobs use exponential retry backoff after consecutive errors (30s → 1m → 5m → 15m → 60m), then return to normal schedule after the next successful run. Main-session recurring jobs now auto-disable after 2 consecutive permanent target-resolution run errors (for example `Unknown Channel` or `Target channel could not be resolved`).
 
 Note: `openclaw cron run` now returns as soon as the manual run is queued for execution. Successful responses include `{ ok: true, enqueued: true, runId }`; use `openclaw cron runs --id <job-id>` to follow the eventual outcome.
 
@@ -52,10 +52,11 @@ Note: if an isolated cron run returns only the silent token (`NO_REPLY` /
 summary path as well, so nothing is posted back to chat.
 
 Note: `cron add|edit --model ...` uses that selected allowed model for the job.
-If the model is not allowed, cron warns and falls back to the job's agent/default
-model selection instead. Configured fallback chains still apply, but a plain
-model override with no explicit per-job fallback list no longer appends the
-agent primary as a hidden extra retry target.
+If the model is not allowed, cron rejects the add/edit request. Stored bad
+overrides also fail explicitly at runtime until you remove or fix
+`payload.model`. Configured fallback chains still apply, but a plain model
+override with no explicit per-job fallback list no longer appends the agent
+primary as a hidden extra retry target.
 
 Note: isolated cron model precedence is Gmail-hook override first, then per-job
 `--model`, then any stored cron-session model override, then the normal

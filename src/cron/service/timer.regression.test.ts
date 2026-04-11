@@ -395,6 +395,163 @@ describe("cron service timer regressions", () => {
     expect(job!.state.nextRunAtMs).toBeUndefined();
   });
 
+  it("auto-disables recurring main-session jobs after repeated permanent target-resolution errors", () => {
+    const firstStartedAt = Date.parse("2026-04-10T10:00:00.000Z");
+    const enqueueSystemEvent = vi.fn();
+    const requestHeartbeatNow = vi.fn();
+
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: "/tmp/cron-recurring-main-permanent-run-error.json",
+      log: noopLogger,
+      nowMs: () => firstStartedAt,
+      enqueueSystemEvent,
+      requestHeartbeatNow,
+      runIsolatedAgentJob: createDefaultIsolatedRunner(),
+    });
+
+    const job: CronJob = {
+      id: "main-recurring-permanent-run-error",
+      name: "main recurring permanent run error",
+      enabled: true,
+      createdAtMs: firstStartedAt - 86_400_000,
+      updatedAtMs: firstStartedAt - 86_400_000,
+      schedule: { kind: "every", everyMs: 60_000, anchorMs: firstStartedAt - 60_000 },
+      sessionTarget: "main",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "systemEvent", text: "tick" },
+      state: { nextRunAtMs: firstStartedAt - 1 },
+    };
+
+    applyJobResult(state, job, {
+      status: "error",
+      error: "Unknown Channel",
+      startedAt: firstStartedAt,
+      endedAt: firstStartedAt + 25,
+    });
+
+    expect(job.enabled).toBe(true);
+    expect(job.state.consecutiveErrors).toBe(1);
+    expect(job.state.nextRunAtMs).toBeDefined();
+
+    const secondStartedAt = firstStartedAt + 60_000;
+    applyJobResult(state, job, {
+      status: "error",
+      error: "Target channel could not be resolved.",
+      startedAt: secondStartedAt,
+      endedAt: secondStartedAt + 35,
+    });
+
+    expect(job.enabled).toBe(false);
+    expect(job.state.consecutiveErrors).toBe(2);
+    expect(job.state.nextRunAtMs).toBeUndefined();
+    expect(enqueueSystemEvent).toHaveBeenCalledWith(
+      expect.stringContaining("auto-disabled"),
+      expect.objectContaining({
+        contextKey: "cron:main-recurring-permanent-run-error:auto-disabled-permanent-run-error",
+      }),
+    );
+    expect(requestHeartbeatNow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "cron:main-recurring-permanent-run-error:auto-disabled-permanent-run-error",
+      }),
+    );
+  });
+
+  it("keeps recurring run errors on backoff when failures are transient", () => {
+    const startedAt = Date.parse("2026-04-10T11:00:00.000Z");
+    const enqueueSystemEvent = vi.fn();
+    const requestHeartbeatNow = vi.fn();
+
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: "/tmp/cron-recurring-main-transient-run-error.json",
+      log: noopLogger,
+      nowMs: () => startedAt,
+      enqueueSystemEvent,
+      requestHeartbeatNow,
+      runIsolatedAgentJob: createDefaultIsolatedRunner(),
+    });
+
+    const job: CronJob = {
+      id: "main-recurring-transient-run-error",
+      name: "main recurring transient run error",
+      enabled: true,
+      createdAtMs: startedAt - 86_400_000,
+      updatedAtMs: startedAt - 86_400_000,
+      schedule: { kind: "every", everyMs: 60_000, anchorMs: startedAt - 60_000 },
+      sessionTarget: "main",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "systemEvent", text: "tick" },
+      state: { nextRunAtMs: startedAt - 1 },
+    };
+
+    applyJobResult(state, job, {
+      status: "error",
+      error: "network fetch failed: ECONNRESET",
+      startedAt,
+      endedAt: startedAt + 20,
+    });
+
+    const firstBackoffNext = job.state.nextRunAtMs;
+    expect(job.enabled).toBe(true);
+    expect(job.state.consecutiveErrors).toBe(1);
+    expect(firstBackoffNext).toBeDefined();
+
+    const secondStartedAt = startedAt + 60_000;
+    applyJobResult(state, job, {
+      status: "error",
+      error: "network fetch failed: ETIMEDOUT",
+      startedAt: secondStartedAt,
+      endedAt: secondStartedAt + 20,
+    });
+
+    expect(job.enabled).toBe(true);
+    expect(job.state.consecutiveErrors).toBe(2);
+    expect(job.state.nextRunAtMs).toBeDefined();
+    expect(job.state.nextRunAtMs).toBeGreaterThan(secondStartedAt + 20);
+    expect(enqueueSystemEvent).not.toHaveBeenCalled();
+    expect(requestHeartbeatNow).not.toHaveBeenCalled();
+  });
+
+  it("keeps one-shot behavior unchanged for permanent target-resolution errors", () => {
+    const startedAt = Date.parse("2026-04-10T12:00:00.000Z");
+
+    const state = createCronServiceState({
+      cronEnabled: true,
+      storePath: "/tmp/cron-oneshot-main-permanent-run-error.json",
+      log: noopLogger,
+      nowMs: () => startedAt,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeatNow: vi.fn(),
+      runIsolatedAgentJob: createDefaultIsolatedRunner(),
+    });
+
+    const job: CronJob = {
+      id: "oneshot-main-permanent-run-error",
+      name: "oneshot main permanent run error",
+      enabled: true,
+      createdAtMs: startedAt - 86_400_000,
+      updatedAtMs: startedAt - 86_400_000,
+      schedule: { kind: "at", at: new Date(startedAt).toISOString() },
+      sessionTarget: "main",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "systemEvent", text: "tick" },
+      state: { nextRunAtMs: startedAt - 1 },
+    };
+
+    applyJobResult(state, job, {
+      status: "error",
+      error: "Unknown Channel",
+      startedAt,
+      endedAt: startedAt + 10,
+    });
+
+    expect(job.enabled).toBe(false);
+    expect(job.state.consecutiveErrors).toBe(1);
+    expect(job.state.nextRunAtMs).toBeUndefined();
+  });
+
   it("prevents spin loop when cron job completes within the scheduled second (#17821)", async () => {
     const store = timerRegressionFixtures.makeStorePath();
     const scheduledAt = Date.parse("2026-02-15T13:00:00.000Z");

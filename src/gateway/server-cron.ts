@@ -16,6 +16,7 @@ import {
 } from "../cron/delivery.js";
 import { runCronIsolatedAgentTurn } from "../cron/isolated-agent.js";
 import { resolveDeliveryTarget } from "../cron/isolated-agent/delivery-target.js";
+import { assertCronPayloadModelAllowed } from "../cron/model-override-policy.js";
 import {
   appendCronRunLog,
   resolveCronRunLogPath,
@@ -241,6 +242,12 @@ export function buildGatewayCronService(params: {
     defaultAgentId,
     resolveSessionStorePath,
     sessionStorePath,
+    validateJobBeforeSave: async (job) => {
+      await assertCronPayloadModelAllowed({
+        cfg: loadConfig(),
+        job,
+      });
+    },
     enqueueSystemEvent: (text, opts) => {
       const { agentId, cfg: runtimeConfig } = resolveCronAgent(opts?.agentId);
       const sessionKey = resolveCronSessionKey({

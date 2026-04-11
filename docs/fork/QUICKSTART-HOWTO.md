@@ -1295,7 +1295,17 @@ The proposal appears in Discord as an embed with three buttons:
 - **Reject**: Marks the proposal as rejected
 - **More Info**: Shows the full proposal text (ephemeral, only visible to you)
 
-Proposals are stored in `~/.openclaw/scout-proposals/registry.json`:
+Proposals are stored in `~/.openclaw/scout-proposals/registry.json`.
+
+If you need to trigger delivery manually, use the supported notifier path from the repo root:
+
+```bash
+node --import tsx scripts/scout-notify.ts
+```
+
+The notifier is self-contained and does not require `extensions/trend-scout/src/discord-buttons.js` at runtime.
+
+Registry example:
 
 ```json
 {

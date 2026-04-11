@@ -1663,10 +1663,11 @@ Subcommands:
 All `cron` commands accept `--url`, `--token`, `--timeout`, `--expect-final`.
 
 `cron add|edit --model ...` uses that selected allowed model for the job. If
-the model is not allowed, cron warns and falls back to the job's agent/default
-model selection instead. Configured fallback chains still apply, but a plain
-model override with no explicit per-job fallback list no longer appends the
-agent primary as a hidden extra retry target.
+the model is not allowed, cron rejects the add/edit request. Stored bad
+overrides also fail explicitly at runtime until you remove or fix
+`payload.model`. Configured fallback chains still apply, but a plain model
+override with no explicit per-job fallback list no longer appends the agent
+primary as a hidden extra retry target.
 
 ## Node host
 

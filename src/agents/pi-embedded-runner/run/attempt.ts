@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage, StreamFn } from "@mariozechner/pi-agent-core";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -63,6 +63,7 @@ import {
 } from "../../pi-bundle-mcp-tools.js";
 import {
   downgradeOpenAIFunctionCallReasoningPairs,
+  downgradeOpenAIReasoningBlocks,
   isCloudCodeAssistFormatError,
   resolveBootstrapMaxChars,
   resolveBootstrapPromptTruncationWarningMode,
@@ -234,6 +235,25 @@ export {
   resolveEmbeddedAgentStreamFn,
 };
 
+export function wrapStreamFnSanitizeOpenAIResponsesFollowupContext(baseFn: StreamFn): StreamFn {
+  return (model, context, options) => {
+    const ctx = context as unknown as { messages?: unknown };
+    const messages = ctx?.messages;
+    if (!Array.isArray(messages)) {
+      return baseFn(model, context, options);
+    }
+    const sanitized = sanitizeOpenAIResponsesFollowupMessages(messages as AgentMessage[]);
+    if (sanitized === messages) {
+      return baseFn(model, context, options);
+    }
+    const nextContext = {
+      ...(context as unknown as Record<string, unknown>),
+      messages: sanitized,
+    } as unknown;
+    return baseFn(model, nextContext as typeof context, options);
+  };
+}
+
 const MAX_BTW_SNAPSHOT_MESSAGES = 100;
 
 function summarizeMessagePayload(msg: AgentMessage): { textChars: number; imageBlocks: number } {
@@ -297,6 +317,10 @@ function summarizeSessionContext(messages: AgentMessage[]): {
     totalImageBlocks,
     maxMessageTextChars,
   };
+}
+
+export function sanitizeOpenAIResponsesFollowupMessages(messages: AgentMessage[]): AgentMessage[] {
+  return downgradeOpenAIFunctionCallReasoningPairs(downgradeOpenAIReasoningBlocks(messages));
 }
 
 export async function runEmbeddedAttempt(
@@ -1080,23 +1104,9 @@ export async function runEmbeddedAttempt(
         params.model.api === "azure-openai-responses" ||
         params.model.api === "openai-codex-responses"
       ) {
-        const inner = activeSession.agent.streamFn;
-        activeSession.agent.streamFn = (model, context, options) => {
-          const ctx = context as unknown as { messages?: unknown };
-          const messages = ctx?.messages;
-          if (!Array.isArray(messages)) {
-            return inner(model, context, options);
-          }
-          const sanitized = downgradeOpenAIFunctionCallReasoningPairs(messages as AgentMessage[]);
-          if (sanitized === messages) {
-            return inner(model, context, options);
-          }
-          const nextContext = {
-            ...(context as unknown as Record<string, unknown>),
-            messages: sanitized,
-          } as unknown;
-          return inner(model, nextContext as typeof context, options);
-        };
+        activeSession.agent.streamFn = wrapStreamFnSanitizeOpenAIResponsesFollowupContext(
+          activeSession.agent.streamFn,
+        );
       }
 
       const innerStreamFn = activeSession.agent.streamFn;

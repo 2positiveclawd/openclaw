@@ -24,6 +24,7 @@ import {
   shouldWarnOnOrphanedUserRepair,
   wrapStreamFnRepairMalformedToolCallArguments,
   wrapStreamFnSanitizeMalformedToolCalls,
+  wrapStreamFnSanitizeOpenAIResponsesFollowupContext,
   wrapStreamFnTrimToolCallNames,
 } from "./attempt.js";
 
@@ -348,6 +349,91 @@ describe("resolveEmbeddedAgentStreamFn", () => {
     });
 
     expect(streamFn).toBe(currentStreamFn);
+  });
+});
+
+describe("wrapStreamFnSanitizeOpenAIResponsesFollowupContext", () => {
+  it("strips orphaned OpenAI reasoning blocks before the stream function sees follow-up context", async () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: "hidden",
+            thinkingSignature: {
+              id: "rs_orphan",
+              type: "reasoning",
+            },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+      },
+    ];
+    const baseFn = vi.fn((_model, _context) =>
+      createFakeStream({ events: [], resultMessage: { role: "assistant", content: [] } }),
+    );
+
+    const wrapped = wrapStreamFnSanitizeOpenAIResponsesFollowupContext(baseFn as never);
+    const stream = wrapped({} as never, { messages } as never, {} as never) as
+      | FakeWrappedStream
+      | Promise<FakeWrappedStream>;
+    await Promise.resolve(stream);
+
+    expect(baseFn).toHaveBeenCalledTimes(1);
+    const seenContext = baseFn.mock.calls[0]?.[1] as {
+      messages: Array<{ role?: string; content?: unknown[] }>;
+    };
+    expect(seenContext.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+      },
+    ]);
+  });
+
+  it("keeps valid reasoning blocks when assistant visible content follows", async () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: "hidden",
+            thinkingSignature: {
+              id: "rs_valid",
+              type: "reasoning",
+            },
+          },
+          {
+            type: "text",
+            text: "Visible answer",
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "continue" }],
+      },
+    ];
+    const baseFn = vi.fn((_model, _context) =>
+      createFakeStream({ events: [], resultMessage: { role: "assistant", content: [] } }),
+    );
+
+    const wrapped = wrapStreamFnSanitizeOpenAIResponsesFollowupContext(baseFn as never);
+    const stream = wrapped({} as never, { messages } as never, {} as never) as
+      | FakeWrappedStream
+      | Promise<FakeWrappedStream>;
+    await Promise.resolve(stream);
+
+    expect(baseFn).toHaveBeenCalledTimes(1);
+    const seenContext = baseFn.mock.calls[0]?.[1] as {
+      messages: Array<{ role?: string; content?: unknown[] }>;
+    };
+    expect(seenContext.messages).toEqual(messages);
   });
 });
 

@@ -174,7 +174,9 @@ describe("runCronIsolatedAgentTurn — cron model override (#21057)", () => {
     const result = await runCronIsolatedAgentTurn(makeParams());
 
     expect(result.status).toBe("error");
-    expect(result.error).toContain("Model not allowed");
+    expect(result.error).toBe(
+      "cron: payload.model 'anthropic/claude-sonnet-4-6' is not allowed by policy. Remove payload.model to use agent defaults.",
+    );
     // Model should remain undefined — the early return happens before the
     // pre-run persist block, so neither the session entry nor the store
     // should be touched with a rejected model.
