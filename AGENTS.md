@@ -106,7 +106,7 @@ The OpenClaw fork code at `/home/azureuser/openclaw/` is kept as reference for t
 
 > **Full documentation:** See `docs/fork/LOCAL-PATCHES.md` for the complete merge workflow, conflict strategy, and footguns.
 
-After the 2026-04-11 merge we keep the fork as thin as possible. Three patches remain — everything else tracks upstream exactly.
+After the 2026-04-11 merge we keep the fork as thin as possible. Seven patches remain — everything else tracks upstream exactly. Patches #1–#3 are core runtime/auth fixes. Patches #4–#7 are cron + live-follow-up correctness fixes and fork-specific tooling; they were originally landed as the 2026-04-07…2026-04-10 WIP snapshot and promoted to proper fork patches on 2026-04-11 after verifying upstream does not cover them.
 
 ### 1. Azure Managed Identity auth — `src/agents/model-auth.ts`
 
@@ -134,6 +134,34 @@ Prevents 15-hour systemd restart loops from single transient crashes. On 2026-04
 - Added to `isRecoverableException()` (upstream wrote this function but never wired it into the uncaughtException path).
 - Both `process.on("uncaughtException", …)` handlers (`src/index.ts`, `src/cli/run-main.ts`) now consult `isRecoverableException` first and, on match, log `[openclaw] Suppressed recoverable uncaught exception (continuing): …` at warn level and return instead of exiting.
 - 6 narrow test assertions in `src/infra/unhandled-rejections.test.ts` (includes the verbatim 2026-04-10 crash stack as a fixture).
+
+### 4. Cron `payload.model` validation — `src/cron/model-override-policy.ts` + `src/cron/service/{state,ops}.ts` + `src/cron/isolated-agent/model-selection.ts` + `src/gateway/server-cron.ts`
+
+Upstream silently swaps a disallowed `payload.model` back to agent defaults, hiding cost and quality drift. The fork converts this into loud errors at save time AND run time.
+
+- `assertCronPayloadModelAllowed` / `resolveCronPayloadModelIssue` in `src/cron/model-override-policy.ts` (new file).
+- `CronServiceDeps.validateJobBeforeSave?:` optional hook in `src/cron/service/state.ts`; invoked at add and edit call sites in `src/cron/service/ops.ts` (edit path clones + applies patch before validation so failure does not mutate the real job).
+- `src/gateway/server-cron.ts` wires `loadConfig()` + `assertCronPayloadModelAllowed` into the hook.
+- `src/cron/isolated-agent/model-selection.ts` flips upstream's silent `{ ok: true, warning }` fallback on `"model not allowed:"` to `{ ok: false, error: "cron: payload.model '…' is not allowed by policy. Remove payload.model to use agent defaults." }`.
+
+### 5. Scout proposal notifier tooling — `scripts/scout-notify.ts` + `scripts/lib/scout-proposals.ts`
+
+Fork-only tooling driven by three cron jobs (`nightly-scout`, `vision-scout`, `nightly-scout-catchup`) that read `~/.openclaw/scout-proposals/registry.json`, send pending proposals to Discord with Approve/Reject/More Info buttons, and update the registry with message IDs. Upstream has no equivalent — this is operator workflow specific to this deployment. Uses `readBestEffortConfig()` (upstream API) so unrelated legacy schema drift cannot block delivery. Covered by `test/scripts/scout-notify.smoke.test.ts` and `test/scripts/scout-proposals.test.ts`.
+
+### 6. OpenAI live follow-up reasoning cleanup — `src/agents/pi-embedded-runner/run/attempt.ts`
+
+Upstream's replay-history path already runs **both** `downgradeOpenAIFunctionCallReasoningPairs(downgradeOpenAIReasoningBlocks(messages))`, but the **live** follow-up stream wrap only runs one of them. That asymmetry leaks orphaned `rs_*` reasoning metadata into follow-up turns and causes `Item with id 'rs_...' not found` 400s from the OpenAI Responses API (9 occurrences in the 2026-04-10 journal alone).
+
+- Extracted the inline wrapper into `wrapStreamFnSanitizeOpenAIResponsesFollowupContext(baseFn)` and added `sanitizeOpenAIResponsesFollowupMessages(messages)` that chains both sanitizers in the same order as the replay path.
+- Regression coverage in `src/agents/pi-embedded-runner/run/attempt.test.ts` for orphan-block dropping and preservation of valid blocks.
+
+### 7. Recurring cron permanent-error auto-disable — `src/cron/service/timer.ts`
+
+Upstream auto-disables one-shot `"at"` jobs on permanent errors but only applies exponential backoff to recurring `"every"`/`"cron"` jobs, which means a permanent target-resolution failure (Unknown Channel, chat not found) keeps retrying forever. The fork adds a narrow recurring-main-session-specific handler.
+
+- Regex allowlist of permanent target-resolution errors (`unknown channel`, `target channel could not be resolved`, `chat not found`, `could not resolve (target|channel)`) — `RECURRING_MAIN_RUN_PERMANENT_ERROR_PATTERNS`.
+- `isRecurringMainPermanentRunError` / `shouldDisableRecurringMainJobAfterPermanentRunError` / `autoDisableRecurringMainJobAfterPermanentRunError` guarded to: recurring + `sessionTarget === "main"` + match pattern + `consecutiveErrors >= 2` + previous error also matched. Disables the job, clears `nextRunAtMs`, logs a warn line, and enqueues an operator-visible system event plus heartbeat wake request.
+- Regression coverage in `src/cron/service/timer.regression.test.ts`.
 
 ### Dropped in 2026-04-05 (do NOT re-add)
 
