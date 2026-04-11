@@ -29,6 +29,38 @@ export type RuntimeThreadBindingLifecycleRecord =
       maxAgeMs?: number;
     };
 
+export type PluginRuntimeChannelContextKey = {
+  channelId: string;
+  accountId?: string | null;
+  capability: string;
+};
+
+export type PluginRuntimeChannelContextEvent = {
+  type: "registered" | "unregistered";
+  key: {
+    channelId: string;
+    accountId?: string;
+    capability: string;
+  };
+  context?: unknown;
+};
+
+export type PluginRuntimeChannelContextRegistry = {
+  register: (
+    params: PluginRuntimeChannelContextKey & {
+      context: unknown;
+      abortSignal?: AbortSignal;
+    },
+  ) => { dispose: () => void };
+  get: <T = unknown>(params: PluginRuntimeChannelContextKey) => T | undefined;
+  watch: (params: {
+    channelId?: string;
+    accountId?: string | null;
+    capability?: string;
+    onEvent: (event: PluginRuntimeChannelContextEvent) => void;
+  }) => () => void;
+};
+
 export type PluginRuntimeChannel = {
   text: {
     chunkByNewline: typeof import("../../auto-reply/chunk.js").chunkByNewline;
@@ -39,7 +71,7 @@ export type PluginRuntimeChannel = {
     resolveChunkMode: typeof import("../../auto-reply/chunk.js").resolveChunkMode;
     resolveTextChunkLimit: typeof import("../../auto-reply/chunk.js").resolveTextChunkLimit;
     hasControlCommand: typeof import("../../auto-reply/command-detection.js").hasControlCommand;
-    resolveMarkdownTableMode: typeof import("../../config/markdown-tables.js").resolveMarkdownTableMode;
+    resolveMarkdownTableMode: import("../../config/markdown-tables.types.js").ResolveMarkdownTableMode;
     convertMarkdownTables: typeof import("../../markdown/tables.js").convertMarkdownTables;
   };
   reply: {
@@ -47,7 +79,7 @@ export type PluginRuntimeChannel = {
     createReplyDispatcherWithTyping: typeof import("../../auto-reply/reply/reply-dispatcher.js").createReplyDispatcherWithTyping;
     resolveEffectiveMessagesConfig: typeof import("../../agents/identity.js").resolveEffectiveMessagesConfig;
     resolveHumanDelayConfig: typeof import("../../agents/identity.js").resolveHumanDelayConfig;
-    dispatchReplyFromConfig: typeof import("../../auto-reply/reply/dispatch-from-config.js").dispatchReplyFromConfig;
+    dispatchReplyFromConfig: import("../../auto-reply/reply/dispatch-from-config.types.js").DispatchReplyFromConfig;
     withReplyDispatcher: typeof import("../../auto-reply/dispatch.js").withReplyDispatcher;
     finalizeInboundContext: typeof import("../../auto-reply/reply/inbound-context.js").finalizeInboundContext;
     formatAgentEnvelope: typeof import("../../auto-reply/envelope.js").formatAgentEnvelope;
@@ -83,6 +115,8 @@ export type PluginRuntimeChannel = {
     buildMentionRegexes: typeof import("../../auto-reply/reply/mentions.js").buildMentionRegexes;
     matchesMentionPatterns: typeof import("../../auto-reply/reply/mentions.js").matchesMentionPatterns;
     matchesMentionWithExplicit: typeof import("../../auto-reply/reply/mentions.js").matchesMentionWithExplicit;
+    implicitMentionKindWhen: typeof import("../../channels/mention-gating.js").implicitMentionKindWhen;
+    resolveInboundMentionDecision: typeof import("../../channels/mention-gating.js").resolveInboundMentionDecision;
   };
   reactions: {
     shouldAckReaction: typeof import("../../channels/ack-reactions.js").shouldAckReaction;
@@ -103,7 +137,7 @@ export type PluginRuntimeChannel = {
     shouldHandleTextCommands: typeof import("../../auto-reply/commands-registry.js").shouldHandleTextCommands;
   };
   outbound: {
-    loadAdapter: typeof import("../../channels/plugins/outbound/load.js").loadChannelOutboundAdapter;
+    loadAdapter: import("../../channels/plugins/outbound/load.types.js").LoadChannelOutboundAdapter;
   };
   threadBindings: {
     setIdleTimeoutBySessionKey: (params: {
@@ -119,4 +153,5 @@ export type PluginRuntimeChannel = {
       maxAgeMs: number;
     }) => RuntimeThreadBindingLifecycleRecord[];
   };
+  runtimeContexts: PluginRuntimeChannelContextRegistry;
 };

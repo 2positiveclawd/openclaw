@@ -618,7 +618,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 type: "boolean",
                 title: "Browser Dangerously Allow Private Network",
                 description:
-                  "Allows access to private-network address ranges from browser tooling. Default is enabled for trusted-network operator setups; disable to enforce strict public-only resolution checks.",
+                  "Allows access to private-network address ranges from browser tooling. Default is disabled when unset; enable only for explicitly trusted private-network destinations.",
               },
               allowedHostnames: {
                 type: "array",
@@ -2695,11 +2695,17 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                       description:
                         "Optional TLS settings used when connecting directly to the upstream model endpoint.",
                     },
+                    allowPrivateNetwork: {
+                      type: "boolean",
+                      title: "Model Provider Request Allow Private Network",
+                      description:
+                        "When true, allow HTTPS to the model base URL when DNS resolves to private, CGNAT, or similar ranges, via the provider HTTP fetch guard (fetchWithSsrFGuard). OpenAI Responses WebSocket reuses request for headers/TLS but does not use that fetch SSRF path. Use only for operator-controlled self-hosted OpenAI-compatible endpoints (LAN, overlay, split DNS). Default is false.",
+                    },
                   },
                   additionalProperties: false,
                   title: "Model Provider Request Overrides",
                   description:
-                    "Optional request overrides for model-provider requests, including extra headers, auth overrides, proxy routing, and TLS client settings. Use these only when your upstream or enterprise network path requires transport customization.",
+                    "Optional request overrides for model-provider requests, including extra headers, auth overrides, proxy routing, TLS client settings, and optional allowPrivateNetwork for trusted self-hosted endpoints. Use these only when your upstream or enterprise network path requires transport customization.",
                 },
                 models: {
                   type: "array",
@@ -2805,6 +2811,9 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                             type: "boolean",
                           },
                           supportsStrictMode: {
+                            type: "boolean",
+                          },
+                          requiresStringContent: {
                             type: "boolean",
                           },
                           maxTokensField: {
@@ -2945,6 +2954,28 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 },
                 additionalProperties: {},
               },
+              embeddedHarness: {
+                type: "object",
+                properties: {
+                  runtime: {
+                    type: "string",
+                    title: "Default Embedded Harness Runtime",
+                    description:
+                      "Embedded harness runtime: auto, pi, or a registered plugin harness id such as codex.",
+                  },
+                  fallback: {
+                    type: "string",
+                    enum: ["pi", "none"],
+                    title: "Default Embedded Harness Fallback",
+                    description:
+                      "Embedded harness fallback when no plugin harness matches or an auto-selected plugin harness fails before side effects. Set none to disable automatic PI fallback.",
+                  },
+                },
+                additionalProperties: false,
+                title: "Default Embedded Harness",
+                description:
+                  "Default embedded agent harness policy. Use runtime=auto for plugin harness selection, runtime=pi for built-in PI, or a registered harness id such as codex.",
+              },
               model: {
                 anyOf: [
                   {
@@ -3053,6 +3084,39 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                   },
                 ],
               },
+              musicGenerationModel: {
+                anyOf: [
+                  {
+                    type: "string",
+                  },
+                  {
+                    type: "object",
+                    properties: {
+                      primary: {
+                        type: "string",
+                        title: "Music Generation Model",
+                        description:
+                          "Optional music-generation model (provider/model) used by the shared music generation capability.",
+                      },
+                      fallbacks: {
+                        type: "array",
+                        items: {
+                          type: "string",
+                        },
+                        title: "Music Generation Model Fallbacks",
+                        description: "Ordered fallback music-generation models (provider/model).",
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                ],
+              },
+              mediaGenerationAutoProviderFallback: {
+                type: "boolean",
+                title: "Media Generation Auto Provider Fallback",
+                description:
+                  "When true (default), shared image, music, and video generation automatically appends other auth-backed provider defaults after explicit primary/fallback refs. Set false to disable implicit cross-provider fallback while keeping explicit fallbacks.",
+              },
               pdfModel: {
                 anyOf: [
                   {
@@ -3142,8 +3206,26 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 description:
                   "Optional repository root shown in the system prompt runtime line (overrides auto-detect).",
               },
+              systemPromptOverride: {
+                type: "string",
+              },
               skipBootstrap: {
                 type: "boolean",
+              },
+              contextInjection: {
+                anyOf: [
+                  {
+                    type: "string",
+                    const: "always",
+                  },
+                  {
+                    type: "string",
+                    const: "continuation-skip",
+                  },
+                ],
+                title: "Context Injection",
+                description:
+                  'Controls when workspace bootstrap files are injected into the system prompt: "always" (default) or "continuation-skip" for safe continuation turns after a completed assistant response.',
               },
               bootstrapMaxChars: {
                 type: "integer",
@@ -3237,6 +3319,278 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 type: "integer",
                 exclusiveMinimum: 0,
                 maximum: 9007199254740991,
+              },
+              cliBackends: {
+                type: "object",
+                propertyNames: {
+                  type: "string",
+                },
+                additionalProperties: {
+                  type: "object",
+                  properties: {
+                    command: {
+                      type: "string",
+                    },
+                    args: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                      },
+                    },
+                    output: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "json",
+                        },
+                        {
+                          type: "string",
+                          const: "text",
+                        },
+                        {
+                          type: "string",
+                          const: "jsonl",
+                        },
+                      ],
+                    },
+                    resumeOutput: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "json",
+                        },
+                        {
+                          type: "string",
+                          const: "text",
+                        },
+                        {
+                          type: "string",
+                          const: "jsonl",
+                        },
+                      ],
+                    },
+                    jsonlDialect: {
+                      type: "string",
+                      const: "claude-stream-json",
+                    },
+                    input: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "arg",
+                        },
+                        {
+                          type: "string",
+                          const: "stdin",
+                        },
+                      ],
+                    },
+                    maxPromptArgChars: {
+                      type: "integer",
+                      exclusiveMinimum: 0,
+                      maximum: 9007199254740991,
+                    },
+                    env: {
+                      type: "object",
+                      propertyNames: {
+                        type: "string",
+                      },
+                      additionalProperties: {
+                        type: "string",
+                      },
+                    },
+                    clearEnv: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                      },
+                    },
+                    modelArg: {
+                      type: "string",
+                    },
+                    modelAliases: {
+                      type: "object",
+                      propertyNames: {
+                        type: "string",
+                      },
+                      additionalProperties: {
+                        type: "string",
+                      },
+                    },
+                    sessionArg: {
+                      type: "string",
+                    },
+                    sessionArgs: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                      },
+                    },
+                    resumeArgs: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                      },
+                    },
+                    sessionMode: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "always",
+                        },
+                        {
+                          type: "string",
+                          const: "existing",
+                        },
+                        {
+                          type: "string",
+                          const: "none",
+                        },
+                      ],
+                    },
+                    sessionIdFields: {
+                      type: "array",
+                      items: {
+                        type: "string",
+                      },
+                    },
+                    systemPromptArg: {
+                      type: "string",
+                    },
+                    systemPromptFileConfigArg: {
+                      type: "string",
+                    },
+                    systemPromptFileConfigKey: {
+                      type: "string",
+                    },
+                    systemPromptMode: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "append",
+                        },
+                        {
+                          type: "string",
+                          const: "replace",
+                        },
+                      ],
+                    },
+                    systemPromptWhen: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "first",
+                        },
+                        {
+                          type: "string",
+                          const: "always",
+                        },
+                        {
+                          type: "string",
+                          const: "never",
+                        },
+                      ],
+                    },
+                    imageArg: {
+                      type: "string",
+                    },
+                    imageMode: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "repeat",
+                        },
+                        {
+                          type: "string",
+                          const: "list",
+                        },
+                      ],
+                    },
+                    imagePathScope: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "temp",
+                        },
+                        {
+                          type: "string",
+                          const: "workspace",
+                        },
+                      ],
+                    },
+                    serialize: {
+                      type: "boolean",
+                    },
+                    reliability: {
+                      type: "object",
+                      properties: {
+                        watchdog: {
+                          type: "object",
+                          properties: {
+                            fresh: {
+                              type: "object",
+                              properties: {
+                                noOutputTimeoutMs: {
+                                  type: "integer",
+                                  minimum: 1000,
+                                  maximum: 9007199254740991,
+                                },
+                                noOutputTimeoutRatio: {
+                                  type: "number",
+                                  minimum: 0.05,
+                                  maximum: 0.95,
+                                },
+                                minMs: {
+                                  type: "integer",
+                                  minimum: 1000,
+                                  maximum: 9007199254740991,
+                                },
+                                maxMs: {
+                                  type: "integer",
+                                  minimum: 1000,
+                                  maximum: 9007199254740991,
+                                },
+                              },
+                              additionalProperties: false,
+                            },
+                            resume: {
+                              type: "object",
+                              properties: {
+                                noOutputTimeoutMs: {
+                                  type: "integer",
+                                  minimum: 1000,
+                                  maximum: 9007199254740991,
+                                },
+                                noOutputTimeoutRatio: {
+                                  type: "number",
+                                  minimum: 0.05,
+                                  maximum: 0.95,
+                                },
+                                minMs: {
+                                  type: "integer",
+                                  minimum: 1000,
+                                  maximum: 9007199254740991,
+                                },
+                                maxMs: {
+                                  type: "integer",
+                                  minimum: 1000,
+                                  maximum: 9007199254740991,
+                                },
+                              },
+                              additionalProperties: false,
+                            },
+                          },
+                          additionalProperties: false,
+                        },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
+                  required: ["command"],
+                  additionalProperties: false,
+                },
+                title: "CLI Backends",
+                description: "Optional CLI backends for text-only fallback (claude-cli, etc.).",
               },
               memorySearch: {
                 type: "object",
@@ -3366,7 +3720,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     type: "string",
                     title: "Memory Search Provider",
                     description:
-                      'Selects the embedding backend used to build/query memory vectors: "openai", "gemini", "voyage", "mistral", "ollama", or "local". Keep your most reliable provider here and configure fallback for resilience.',
+                      'Selects the embedding backend used to build/query memory vectors: "openai", "gemini", "voyage", "mistral", "bedrock", "ollama", or "local". Keep your most reliable provider here and configure fallback for resilience.',
                   },
                   remote: {
                     type: "object",
@@ -3521,7 +3875,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     maximum: 9007199254740991,
                     title: "Memory Search Output Dimensionality",
                     description:
-                      "Gemini embedding-2 only: chooses the output vector size for memory embeddings. Use 768, 1536, or 3072 (default), and expect a full reindex when you change it because stored vector dimensions must stay consistent.",
+                      "Provider-specific output vector size override for memory embeddings. Gemini embedding-2 supports 768, 1536, or 3072; Bedrock families such as Titan V2, Cohere V4, and Nova expose their own allowed sizes. Expect a full reindex when you change it because stored vector dimensions must stay consistent.",
                   },
                   local: {
                     type: "object",
@@ -3898,7 +4252,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 properties: {
                   idleTimeoutSeconds: {
                     description:
-                      "Idle timeout for LLM streaming responses in seconds. If no token is received within this time, the request is aborted. Set to 0 to disable. Default: 60 seconds.",
+                      "Idle timeout for LLM streaming responses in seconds. If no token is received within this time, the request is aborted. Set to 0 to disable. Default: 120 seconds.",
                     type: "integer",
                     minimum: 0,
                     maximum: 9007199254740991,
@@ -3923,6 +4277,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     title: "Compaction Mode",
                     description:
                       'Compaction strategy mode: "default" uses baseline behavior, while "safeguard" applies stricter guardrails to preserve recent context. Keep "default" unless you observe aggressive history loss near limit boundaries.',
+                  },
+                  provider: {
+                    type: "string",
+                    title: "Compaction Provider",
+                    description:
+                      "Id of a registered compaction provider plugin used for summarization. When set and the provider is registered, its summarize() method is called instead of the built-in summarizeInStages pipeline. Falls back to built-in on provider failure. Leave unset to use the default built-in summarization.",
                   },
                   reserveTokens: {
                     type: "integer",
@@ -4128,6 +4488,21 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     title: "Embedded Pi Project Settings Policy",
                     description:
                       'How embedded Pi handles workspace-local `.pi/config/settings.json`: "sanitize" (default) strips shellPath/shellCommandPrefix, "ignore" disables project settings entirely, and "trusted" applies project settings as-is.',
+                  },
+                  executionContract: {
+                    anyOf: [
+                      {
+                        type: "string",
+                        const: "default",
+                      },
+                      {
+                        type: "string",
+                        const: "strict-agentic",
+                      },
+                    ],
+                    title: "Embedded Pi Execution Contract",
+                    description:
+                      'Embedded Pi execution contract: "default" keeps the standard runner behavior, while "strict-agentic" keeps OpenAI/OpenAI Codex GPT-5-family runs acting until they hit a real blocker instead of stopping at plans or filler.',
                   },
                 },
                 additionalProperties: false,
@@ -4417,6 +4792,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                   prompt: {
                     type: "string",
                   },
+                  includeSystemPromptSection: {
+                    type: "boolean",
+                    title: "Heartbeat Include System Prompt Section",
+                    description:
+                      "Includes the default agent's ## Heartbeats system prompt section when true. Turn this off to keep heartbeat runtime behavior while omitting the heartbeat prompt instructions from the agent system prompt.",
+                  },
                   ackMaxChars: {
                     type: "integer",
                     minimum: 0,
@@ -4426,6 +4807,14 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     type: "boolean",
                     title: "Heartbeat Suppress Tool Error Warnings",
                     description: "Suppress tool error warning payloads during heartbeat runs.",
+                  },
+                  timeoutSeconds: {
+                    type: "integer",
+                    exclusiveMinimum: 0,
+                    maximum: 9007199254740991,
+                    title: "Heartbeat Timeout (Seconds)",
+                    description:
+                      "Maximum time in seconds allowed for a heartbeat agent turn before it is aborted. Leave unset to use agents.defaults.timeoutSeconds.",
                   },
                   lightContext: {
                     type: "boolean",
@@ -5072,6 +5461,31 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 agentDir: {
                   type: "string",
                 },
+                systemPromptOverride: {
+                  type: "string",
+                },
+                embeddedHarness: {
+                  type: "object",
+                  properties: {
+                    runtime: {
+                      type: "string",
+                      title: "Agent Embedded Harness Runtime",
+                      description:
+                        "Per-agent embedded harness runtime: auto, pi, or a registered plugin harness id such as codex.",
+                    },
+                    fallback: {
+                      type: "string",
+                      enum: ["pi", "none"],
+                      title: "Agent Embedded Harness Fallback",
+                      description:
+                        "Per-agent embedded harness fallback. Set none to disable automatic PI fallback for this agent.",
+                    },
+                  },
+                  additionalProperties: false,
+                  title: "Agent Embedded Harness",
+                  description:
+                    "Per-agent embedded harness policy override. Use fallback=none to make this agent fail instead of falling back to PI.",
+                },
                 model: {
                   anyOf: [
                     {
@@ -5631,6 +6045,12 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     prompt: {
                       type: "string",
                     },
+                    includeSystemPromptSection: {
+                      type: "boolean",
+                      title: "Heartbeat Include System Prompt Section",
+                      description:
+                        "Per-agent override for whether the default agent's ## Heartbeats system prompt section is injected. Use false to keep heartbeat runtime behavior but omit the heartbeat prompt instructions from that agent's system prompt.",
+                    },
                     ackMaxChars: {
                       type: "integer",
                       minimum: 0,
@@ -5638,8 +6058,16 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     },
                     suppressToolErrorWarnings: {
                       type: "boolean",
-                      title: "Agent Heartbeat Suppress Tool Error Warnings",
+                      title: "Heartbeat Suppress Tool Error Warnings",
                       description: "Suppress tool error warning payloads during heartbeat runs.",
+                    },
+                    timeoutSeconds: {
+                      type: "integer",
+                      exclusiveMinimum: 0,
+                      maximum: 9007199254740991,
+                      title: "Heartbeat Timeout (Seconds)",
+                      description:
+                        "Per-agent maximum time in seconds allowed for a heartbeat agent turn before it is aborted. Leave unset to inherit the merged heartbeat/default agent timeout.",
                     },
                     lightContext: {
                       type: "boolean",
@@ -5727,6 +6155,30 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     },
                   },
                   additionalProperties: false,
+                },
+                embeddedPi: {
+                  type: "object",
+                  properties: {
+                    executionContract: {
+                      anyOf: [
+                        {
+                          type: "string",
+                          const: "default",
+                        },
+                        {
+                          type: "string",
+                          const: "strict-agentic",
+                        },
+                      ],
+                      title: "Agent Embedded Pi Execution Contract",
+                      description:
+                        'Optional per-agent embedded Pi execution contract override. Set "strict-agentic" to keep that agent acting through plan-only turns on OpenAI/OpenAI Codex GPT-5-family runs, or "default" to inherit the standard runner behavior.',
+                    },
+                  },
+                  additionalProperties: false,
+                  title: "Agent Embedded Pi",
+                  description:
+                    "Optional per-agent embedded Pi overrides. Use this to opt specific agents into stricter GPT-5 execution behavior without changing the global default.",
                 },
                 sandbox: {
                   type: "object",
@@ -7009,6 +7461,21 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                     title: "Web Fetch Readability Extraction",
                     description:
                       "Use Readability to extract main content from HTML (fallbacks to basic HTML cleanup).",
+                  },
+                  ssrfPolicy: {
+                    type: "object",
+                    properties: {
+                      allowRfc2544BenchmarkRange: {
+                        type: "boolean",
+                        title: "Web Fetch Allow RFC 2544 Benchmark Range",
+                        description:
+                          "Allow RFC 2544 benchmark-range IPs (198.18.0.0/15) for fake-IP proxy compatibility such as Clash or Surge.",
+                      },
+                    },
+                    additionalProperties: false,
+                    title: "Web Fetch SSRF Policy",
+                    description:
+                      "Scoped SSRF policy overrides for web_fetch. Keep this narrow and opt in only for known local-network proxy environments.",
                   },
                   firecrawl: {
                     type: "object",
@@ -8398,6 +8865,18 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 title: "Media Understanding Concurrency",
                 description:
                   "Maximum number of concurrent media understanding operations per turn across image, audio, and video tasks. Lower this in resource-constrained deployments to prevent CPU/network saturation.",
+              },
+              asyncCompletion: {
+                type: "object",
+                properties: {
+                  directSend: {
+                    type: "boolean",
+                    title: "Async Media Completion Direct Send",
+                    description:
+                      "Enable direct channel sends for completed async music/video generation tasks instead of relying on the requester session wake path. Default off so detached media completion keeps the legacy model-delivery flow unless you opt in.",
+                  },
+                },
+                additionalProperties: false,
               },
               image: {
                 type: "object",
@@ -16843,7 +17322,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
                 type: "boolean",
                 title: "Enable Structured Plan Tool",
                 description:
-                  "Enable the experimental structured `update_plan` tool for non-trivial multi-step work tracking across all providers. OpenAI and OpenAI Codex runs auto-enable it even when this flag is unset.",
+                  "Enable the experimental structured `update_plan` tool for non-trivial multi-step work tracking. Leave this off unless you explicitly want the tool outside strict-agentic embedded Pi runs.",
               },
             },
             additionalProperties: false,
@@ -22498,10 +22977,40 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Shared default settings inherited by agents unless overridden per entry in agents.list. Use defaults to enforce consistent baseline behavior and reduce duplicated per-agent configuration.",
       tags: ["advanced"],
     },
+    "agents.defaults.embeddedHarness": {
+      label: "Default Embedded Harness",
+      help: "Default embedded agent harness policy. Use runtime=auto for plugin harness selection, runtime=pi for built-in PI, or a registered harness id such as codex.",
+      tags: ["advanced"],
+    },
+    "agents.defaults.embeddedHarness.runtime": {
+      label: "Default Embedded Harness Runtime",
+      help: "Embedded harness runtime: auto, pi, or a registered plugin harness id such as codex.",
+      tags: ["advanced"],
+    },
+    "agents.defaults.embeddedHarness.fallback": {
+      label: "Default Embedded Harness Fallback",
+      help: "Embedded harness fallback when no plugin harness matches or an auto-selected plugin harness fails before side effects. Set none to disable automatic PI fallback.",
+      tags: ["reliability"],
+    },
     "agents.list": {
       label: "Agent List",
       help: "Explicit list of configured agents with IDs and optional overrides for model, tools, identity, and workspace. Keep IDs stable over time so bindings, approvals, and session routing remain deterministic.",
       tags: ["advanced"],
+    },
+    "agents.list.*.embeddedHarness": {
+      label: "Agent Embedded Harness",
+      help: "Per-agent embedded harness policy override. Use fallback=none to make this agent fail instead of falling back to PI.",
+      tags: ["advanced"],
+    },
+    "agents.list.*.embeddedHarness.runtime": {
+      label: "Agent Embedded Harness Runtime",
+      help: "Per-agent embedded harness runtime: auto, pi, or a registered plugin harness id such as codex.",
+      tags: ["advanced"],
+    },
+    "agents.list.*.embeddedHarness.fallback": {
+      label: "Agent Embedded Harness Fallback",
+      help: "Per-agent embedded harness fallback. Set none to disable automatic PI fallback for this agent.",
+      tags: ["reliability"],
     },
     "gateway.port": {
       label: "Gateway Port",
@@ -22875,6 +23384,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Maximum number of concurrent media understanding operations per turn across image, audio, and video tasks. Lower this in resource-constrained deployments to prevent CPU/network saturation.",
       tags: ["performance", "media", "tools"],
     },
+    "tools.media.asyncCompletion.directSend": {
+      label: "Async Media Completion Direct Send",
+      help: "Enable direct channel sends for completed async music/video generation tasks instead of relying on the requester session wake path. Default off so detached media completion keeps the legacy model-delivery flow unless you opt in.",
+      tags: ["storage", "media", "tools"],
+    },
     "tools.media.audio.enabled": {
       label: "Enable Audio Understanding",
       help: "Enable audio understanding so voice notes or audio clips can be transcribed/summarized for agent context. Disable when audio ingestion is outside policy or unnecessary for your workflows.",
@@ -23214,7 +23728,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     },
     "tools.experimental.planTool": {
       label: "Enable Structured Plan Tool",
-      help: "Enable the experimental structured `update_plan` tool for non-trivial multi-step work tracking across all providers. OpenAI and OpenAI Codex runs auto-enable it even when this flag is unset.",
+      help: "Enable the experimental structured `update_plan` tool for non-trivial multi-step work tracking. Leave this off unless you explicitly want the tool outside strict-agentic embedded Pi runs.",
       tags: ["security", "tools", "advanced"],
     },
     "tools.elevated": {
@@ -23537,6 +24051,16 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Use Readability to extract main content from HTML (fallbacks to basic HTML cleanup).",
       tags: ["tools"],
     },
+    "tools.web.fetch.ssrfPolicy": {
+      label: "Web Fetch SSRF Policy",
+      help: "Scoped SSRF policy overrides for web_fetch. Keep this narrow and opt in only for known local-network proxy environments.",
+      tags: ["access", "tools"],
+    },
+    "tools.web.fetch.ssrfPolicy.allowRfc2544BenchmarkRange": {
+      label: "Web Fetch Allow RFC 2544 Benchmark Range",
+      help: "Allow RFC 2544 benchmark-range IPs (198.18.0.0/15) for fake-IP proxy compatibility such as Clash or Surge.",
+      tags: ["access", "tools"],
+    },
     "gateway.controlUi.basePath": {
       label: "Control UI Base Path",
       help: "Optional URL prefix where the Control UI is served (e.g. /openclaw).",
@@ -23856,6 +24380,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Optional repository root shown in the system prompt runtime line (overrides auto-detect).",
       tags: ["advanced"],
     },
+    "agents.defaults.contextInjection": {
+      label: "Context Injection",
+      help: 'Controls when workspace bootstrap files are injected into the system prompt: "always" (default) or "continuation-skip" for safe continuation turns after a completed assistant response.',
+      tags: ["advanced"],
+    },
     "agents.defaults.bootstrapMaxChars": {
       label: "Bootstrap Max Chars",
       help: "Max characters of each workspace bootstrap file injected into the system prompt before truncation (default: 20000).",
@@ -23958,7 +24487,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     },
     "agents.defaults.memorySearch.provider": {
       label: "Memory Search Provider",
-      help: 'Selects the embedding backend used to build/query memory vectors: "openai", "gemini", "voyage", "mistral", "ollama", or "local". Keep your most reliable provider here and configure fallback for resilience.',
+      help: 'Selects the embedding backend used to build/query memory vectors: "openai", "gemini", "voyage", "mistral", "bedrock", "ollama", or "local". Keep your most reliable provider here and configure fallback for resilience.',
       tags: ["advanced"],
     },
     "agents.defaults.memorySearch.remote.baseUrl": {
@@ -24009,7 +24538,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     },
     "agents.defaults.memorySearch.outputDimensionality": {
       label: "Memory Search Output Dimensionality",
-      help: "Gemini embedding-2 only: chooses the output vector size for memory embeddings. Use 768, 1536, or 3072 (default), and expect a full reindex when you change it because stored vector dimensions must stay consistent.",
+      help: "Provider-specific output vector size override for memory embeddings. Gemini embedding-2 supports 768, 1536, or 3072; Bedrock families such as Titan V2, Cohere V4, and Nova expose their own allowed sizes. Expect a full reindex when you change it because stored vector dimensions must stay consistent.",
       tags: ["advanced"],
     },
     "agents.defaults.memorySearch.fallback": {
@@ -24455,7 +24984,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     },
     "models.providers.*.request": {
       label: "Model Provider Request Overrides",
-      help: "Optional request overrides for model-provider requests, including extra headers, auth overrides, proxy routing, and TLS client settings. Use these only when your upstream or enterprise network path requires transport customization.",
+      help: "Optional request overrides for model-provider requests, including extra headers, auth overrides, proxy routing, TLS client settings, and optional allowPrivateNetwork for trusted self-hosted endpoints. Use these only when your upstream or enterprise network path requires transport customization.",
       tags: ["models"],
     },
     "models.providers.*.request.headers": {
@@ -24588,6 +25117,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Skips upstream TLS certificate verification. Use only for controlled development environments.",
       tags: ["security", "models", "advanced"],
     },
+    "models.providers.*.request.allowPrivateNetwork": {
+      label: "Model Provider Request Allow Private Network",
+      help: "When true, allow HTTPS to the model base URL when DNS resolves to private, CGNAT, or similar ranges, via the provider HTTP fetch guard (fetchWithSsrFGuard). OpenAI Responses WebSocket reuses request for headers/TLS but does not use that fetch SSRF path. Use only for operator-controlled self-hosted OpenAI-compatible endpoints (LAN, overlay, split DNS). Default is false.",
+      tags: ["access", "models"],
+    },
     "models.providers.*.models": {
       label: "Model Provider Model List",
       help: "Declared model list for a provider including identifiers, metadata, and optional compatibility/cost hints. Keep IDs exact to provider catalog values so selection and fallback resolve correctly.",
@@ -24683,6 +25217,21 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Ordered fallback video-generation models (provider/model).",
       tags: ["reliability", "media"],
     },
+    "agents.defaults.musicGenerationModel.primary": {
+      label: "Music Generation Model",
+      help: "Optional music-generation model (provider/model) used by the shared music generation capability.",
+      tags: ["advanced"],
+    },
+    "agents.defaults.musicGenerationModel.fallbacks": {
+      label: "Music Generation Model Fallbacks",
+      help: "Ordered fallback music-generation models (provider/model).",
+      tags: ["reliability"],
+    },
+    "agents.defaults.mediaGenerationAutoProviderFallback": {
+      label: "Media Generation Auto Provider Fallback",
+      help: "When true (default), shared image, music, and video generation automatically appends other auth-backed provider defaults after explicit primary/fallback refs. Set false to disable implicit cross-provider fallback while keeping explicit fallbacks.",
+      tags: ["reliability"],
+    },
     "agents.defaults.pdfModel.primary": {
       label: "PDF Model",
       help: "Optional PDF model (provider/model) for the PDF analysis tool. Defaults to imageModel, then session model.",
@@ -24723,6 +25272,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Maximum delay in ms for custom humanDelay (default: 2500).",
       tags: ["performance"],
     },
+    "agents.defaults.cliBackends": {
+      label: "CLI Backends",
+      help: "Optional CLI backends for text-only fallback (claude-cli, etc.).",
+      tags: ["advanced"],
+    },
     "agents.defaults.compaction": {
       label: "Compaction",
       help: "Compaction tuning for when context nears token limits, including history share, reserve headroom, and pre-compaction memory flush behavior. Use this when long-running sessions need stable continuity under tight context windows.",
@@ -24731,6 +25285,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     "agents.defaults.compaction.mode": {
       label: "Compaction Mode",
       help: 'Compaction strategy mode: "default" uses baseline behavior, while "safeguard" applies stricter guardrails to preserve recent context. Keep "default" unless you observe aggressive history loss near limit boundaries.',
+      tags: ["advanced"],
+    },
+    "agents.defaults.compaction.provider": {
+      label: "Compaction Provider",
+      help: "Id of a registered compaction provider plugin used for summarization. When set and the provider is registered, its summarize() method is called instead of the built-in summarizeInStages pipeline. Falls back to built-in on provider failure. Leave unset to use the default built-in summarization.",
       tags: ["advanced"],
     },
     "agents.defaults.compaction.reserveTokens": {
@@ -24853,6 +25412,31 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: 'How embedded Pi handles workspace-local `.pi/config/settings.json`: "sanitize" (default) strips shellPath/shellCommandPrefix, "ignore" disables project settings entirely, and "trusted" applies project settings as-is.',
       tags: ["access"],
     },
+    "agents.defaults.embeddedPi.executionContract": {
+      label: "Embedded Pi Execution Contract",
+      help: 'Embedded Pi execution contract: "default" keeps the standard runner behavior, while "strict-agentic" keeps OpenAI/OpenAI Codex GPT-5-family runs acting until they hit a real blocker instead of stopping at plans or filler.',
+      tags: ["advanced"],
+    },
+    "agents.defaults.heartbeat.includeSystemPromptSection": {
+      label: "Heartbeat Include System Prompt Section",
+      help: "Includes the default agent's ## Heartbeats system prompt section when true. Turn this off to keep heartbeat runtime behavior while omitting the heartbeat prompt instructions from the agent system prompt.",
+      tags: ["automation"],
+    },
+    "agents.list.*.heartbeat.includeSystemPromptSection": {
+      label: "Heartbeat Include System Prompt Section",
+      help: "Per-agent override for whether the default agent's ## Heartbeats system prompt section is injected. Use false to keep heartbeat runtime behavior but omit the heartbeat prompt instructions from that agent's system prompt.",
+      tags: ["automation"],
+    },
+    "agents.list[].embeddedPi": {
+      label: "Agent Embedded Pi",
+      help: "Optional per-agent embedded Pi overrides. Use this to opt specific agents into stricter GPT-5 execution behavior without changing the global default.",
+      tags: ["advanced"],
+    },
+    "agents.list[].embeddedPi.executionContract": {
+      label: "Agent Embedded Pi Execution Contract",
+      help: 'Optional per-agent embedded Pi execution contract override. Set "strict-agentic" to keep that agent acting through plan-only turns on OpenAI/OpenAI Codex GPT-5-family runs, or "default" to inherit the standard runner behavior.',
+      tags: ["advanced"],
+    },
     "agents.defaults.heartbeat.directPolicy": {
       label: "Heartbeat Direct Policy",
       help: 'Controls whether heartbeat delivery may target direct/DM chats: "allow" (default) permits DM delivery and "block" suppresses direct-target sends.',
@@ -24867,6 +25451,19 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       label: "Heartbeat Suppress Tool Error Warnings",
       help: "Suppress tool error warning payloads during heartbeat runs.",
       tags: ["automation"],
+    },
+    "agents.list.*.heartbeat.suppressToolErrorWarnings": {
+      label: "Heartbeat Suppress Tool Error Warnings",
+      tags: ["automation"],
+    },
+    "agents.defaults.heartbeat.timeoutSeconds": {
+      label: "Heartbeat Timeout (Seconds)",
+      help: "Maximum time in seconds allowed for a heartbeat agent turn before it is aborted. Leave unset to use agents.defaults.timeoutSeconds.",
+      tags: ["performance", "automation"],
+    },
+    "agents.list.*.heartbeat.timeoutSeconds": {
+      label: "Heartbeat Timeout (Seconds)",
+      tags: ["performance", "automation"],
     },
     "agents.defaults.sandbox.browser.network": {
       label: "Sandbox Browser Network",
@@ -25011,7 +25608,7 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
     },
     "browser.ssrfPolicy.dangerouslyAllowPrivateNetwork": {
       label: "Browser Dangerously Allow Private Network",
-      help: "Allows access to private-network address ranges from browser tooling. Default is enabled for trusted-network operator setups; disable to enforce strict public-only resolution checks.",
+      help: "Allows access to private-network address ranges from browser tooling. Default is disabled when unset; enable only for explicitly trusted private-network destinations.",
       tags: ["security", "access", "advanced"],
     },
     "browser.ssrfPolicy.allowedHostnames": {
@@ -25931,6 +26528,11 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       help: "Suppress tool error warning payloads during heartbeat runs.",
       tags: ["automation"],
     },
+    "agents.list[].heartbeat.timeoutSeconds": {
+      label: "Agent Heartbeat Timeout (Seconds)",
+      help: "Per-agent maximum time in seconds allowed for a heartbeat agent turn before it is aborted. Leave unset to inherit the merged heartbeat/default agent timeout.",
+      tags: ["performance", "automation"],
+    },
     "agents.list[].sandbox.browser.network": {
       label: "Agent Sandbox Browser Network",
       help: "Per-agent override for sandbox browser Docker network.",
@@ -26522,6 +27124,6 @@ export const GENERATED_BASE_CONFIG_SCHEMA: BaseConfigSchemaResponse = {
       tags: ["advanced", "url-secret"],
     },
   },
-  version: "2026.4.5",
+  version: "2026.4.11",
   generatedAt: "2026-03-22T21:17:33.302Z",
 };

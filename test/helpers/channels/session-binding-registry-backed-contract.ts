@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { getSessionBindingContractRegistry } from "../../../src/channels/plugins/contracts/registry-session-binding.js";
 import type { ChannelPlugin } from "../../../src/channels/plugins/types.js";
 import {
   clearRuntimeConfigSnapshot,
@@ -14,10 +13,33 @@ import { resetPluginRuntimeStateForTest } from "../../../src/plugins/runtime.js"
 import { setActivePluginRegistry } from "../../../src/plugins/runtime.js";
 import type { PluginRuntime } from "../../../src/plugins/runtime/index.js";
 import {
-  loadBundledPluginPublicSurfaceSync,
+  loadBundledPluginApiSync,
   loadBundledPluginTestApiSync,
 } from "../../../src/test-utils/bundled-plugin-public-surface.js";
 import { createTestRegistry } from "../../../src/test-utils/channel-plugins.js";
+import { getSessionBindingContractRegistry } from "./registry-session-binding.js";
+
+type BluebubblesApiSurface = typeof import("@openclaw/bluebubbles/api.js");
+type DiscordTestApiSurface = typeof import("@openclaw/discord/test-api.js");
+type FeishuApiSurface = typeof import("@openclaw/feishu/api.js");
+type IMessageApiSurface = typeof import("@openclaw/imessage/api.js");
+type MatrixApiSurface = typeof import("@openclaw/matrix/api.js");
+type MatrixTestApiSurface = typeof import("@openclaw/matrix/test-api.js");
+type TelegramApiSurface = typeof import("@openclaw/telegram/api.js");
+type TelegramTestApiSurface = typeof import("@openclaw/telegram/test-api.js");
+
+const { bluebubblesPlugin } = loadBundledPluginApiSync<BluebubblesApiSurface>("bluebubbles");
+const { discordPlugin, discordThreadBindingTesting } =
+  loadBundledPluginTestApiSync<DiscordTestApiSurface>("discord");
+const { feishuPlugin, feishuThreadBindingTesting } =
+  loadBundledPluginApiSync<FeishuApiSurface>("feishu");
+const { imessagePlugin } = loadBundledPluginApiSync<IMessageApiSurface>("imessage");
+const { resetMatrixThreadBindingsForTests } = loadBundledPluginApiSync<MatrixApiSurface>("matrix");
+const { matrixPlugin, setMatrixRuntime } =
+  loadBundledPluginTestApiSync<MatrixTestApiSurface>("matrix");
+const { telegramPlugin } = loadBundledPluginApiSync<TelegramApiSurface>("telegram");
+const { resetTelegramThreadBindingsForTests } =
+  loadBundledPluginTestApiSync<TelegramTestApiSurface>("telegram");
 
 type DiscordThreadBindingTesting = {
   resetThreadBindingsForTests: () => void;
@@ -25,114 +47,53 @@ type DiscordThreadBindingTesting = {
 
 type ResetTelegramThreadBindingsForTests = () => Promise<void>;
 
-let discordThreadBindingTestingCache: DiscordThreadBindingTesting | undefined;
-let resetTelegramThreadBindingsForTestsCache: ResetTelegramThreadBindingsForTests | undefined;
-let feishuApiPromise: Promise<typeof import("../../../extensions/feishu/api.js")> | undefined;
-let matrixApiPromise: Promise<typeof import("../../../extensions/matrix/api.js")> | undefined;
-let bluebubblesPluginCache: ChannelPlugin | undefined;
-let discordPluginCache: ChannelPlugin | undefined;
-let feishuPluginCache: ChannelPlugin | undefined;
-let imessagePluginCache: ChannelPlugin | undefined;
-let matrixPluginCache: ChannelPlugin | undefined;
-let setMatrixRuntimeCache: ((runtime: PluginRuntime) => void) | undefined;
-let telegramPluginCache: ChannelPlugin | undefined;
-
 function getBluebubblesPlugin(): ChannelPlugin {
-  if (!bluebubblesPluginCache) {
-    ({ bluebubblesPlugin: bluebubblesPluginCache } = loadBundledPluginPublicSurfaceSync<{
-      bluebubblesPlugin: ChannelPlugin;
-    }>({ pluginId: "bluebubbles", artifactBasename: "index.js" }));
-  }
-  return bluebubblesPluginCache;
+  return bluebubblesPlugin as unknown as ChannelPlugin;
 }
 
 function getDiscordPlugin(): ChannelPlugin {
-  if (!discordPluginCache) {
-    ({ discordPlugin: discordPluginCache } = loadBundledPluginTestApiSync<{
-      discordPlugin: ChannelPlugin;
-    }>("discord"));
-  }
-  return discordPluginCache;
+  return discordPlugin as unknown as ChannelPlugin;
 }
 
 function getFeishuPlugin(): ChannelPlugin {
-  if (!feishuPluginCache) {
-    ({ feishuPlugin: feishuPluginCache } = loadBundledPluginPublicSurfaceSync<{
-      feishuPlugin: ChannelPlugin;
-    }>({ pluginId: "feishu", artifactBasename: "api.js" }));
-  }
-  return feishuPluginCache;
+  return feishuPlugin as unknown as ChannelPlugin;
 }
 
 function getIMessagePlugin(): ChannelPlugin {
-  if (!imessagePluginCache) {
-    ({ imessagePlugin: imessagePluginCache } = loadBundledPluginPublicSurfaceSync<{
-      imessagePlugin: ChannelPlugin;
-    }>({ pluginId: "imessage", artifactBasename: "api.js" }));
-  }
-  return imessagePluginCache;
+  return imessagePlugin as unknown as ChannelPlugin;
 }
 
 function getMatrixPlugin(): ChannelPlugin {
-  if (!matrixPluginCache) {
-    ({ matrixPlugin: matrixPluginCache, setMatrixRuntime: setMatrixRuntimeCache } =
-      loadBundledPluginTestApiSync<{
-        matrixPlugin: ChannelPlugin;
-        setMatrixRuntime: (runtime: PluginRuntime) => void;
-      }>("matrix"));
-  }
-  return matrixPluginCache;
+  return matrixPlugin as unknown as ChannelPlugin;
 }
 
 function getSetMatrixRuntime(): (runtime: PluginRuntime) => void {
-  if (!setMatrixRuntimeCache) {
-    void getMatrixPlugin();
-  }
-  return setMatrixRuntimeCache!;
+  return setMatrixRuntime;
 }
 
 function getTelegramPlugin(): ChannelPlugin {
-  if (!telegramPluginCache) {
-    ({ telegramPlugin: telegramPluginCache } = loadBundledPluginTestApiSync<{
-      telegramPlugin: ChannelPlugin;
-    }>("telegram"));
-  }
-  return telegramPluginCache;
+  return telegramPlugin as unknown as ChannelPlugin;
 }
 
 function getDiscordThreadBindingTesting(): DiscordThreadBindingTesting {
-  if (!discordThreadBindingTestingCache) {
-    ({ discordThreadBindingTesting: discordThreadBindingTestingCache } =
-      loadBundledPluginTestApiSync<{
-        discordThreadBindingTesting: DiscordThreadBindingTesting;
-      }>("discord"));
-  }
-  return discordThreadBindingTestingCache;
+  return discordThreadBindingTesting;
 }
 
 function getResetTelegramThreadBindingsForTests(): ResetTelegramThreadBindingsForTests {
-  if (!resetTelegramThreadBindingsForTestsCache) {
-    ({ resetTelegramThreadBindingsForTests: resetTelegramThreadBindingsForTestsCache } =
-      loadBundledPluginTestApiSync<{
-        resetTelegramThreadBindingsForTests: ResetTelegramThreadBindingsForTests;
-      }>("telegram"));
-  }
-  return resetTelegramThreadBindingsForTestsCache;
+  return resetTelegramThreadBindingsForTests;
 }
 
 async function getFeishuThreadBindingTesting() {
-  feishuApiPromise ??= import("../../../extensions/feishu/api.js");
-  return (await feishuApiPromise).feishuThreadBindingTesting;
+  return feishuThreadBindingTesting;
 }
 
 async function getResetMatrixThreadBindingsForTests() {
-  matrixApiPromise ??= import("../../../extensions/matrix/api.js");
-  return (await matrixApiPromise).resetMatrixThreadBindingsForTests;
+  return resetMatrixThreadBindingsForTests;
 }
 
 function resolveSessionBindingContractRuntimeConfig(id: string) {
   if (id !== "discord" && id !== "matrix") {
-    return null;
+    return {};
   }
   return {
     plugins: {
@@ -213,12 +174,12 @@ export function describeSessionBindingRegistryBackedContract(id: string) {
     beforeEach(async () => {
       resetPluginRuntimeStateForTest();
       clearRuntimeConfigSnapshot();
+      // Keep the suite hermetic; some contract helpers resolve runtime artifacts through config-aware
+      // plugin boundaries, so never fall back to the developer's real ~/.openclaw/openclaw.json here.
       const runtimeConfig = resolveSessionBindingContractRuntimeConfig(entry.id);
-      if (runtimeConfig) {
-        // These registry-backed contract suites intentionally exercise bundled runtime facades.
-        // Opt those specific plugins in so the activation boundary behaves like real runtime usage.
-        setRuntimeConfigSnapshot(runtimeConfig);
-      }
+      // These registry-backed contract suites intentionally exercise bundled runtime facades.
+      // Opt the bundled-runtime cases in so the activation boundary behaves like real runtime usage.
+      setRuntimeConfigSnapshot(runtimeConfig);
       // These suites only exercise the session-binding channels, so avoid the broader
       // default registry helper and seed only the six plugins this contract lane needs.
       setSessionBindingPluginRegistryForTests();

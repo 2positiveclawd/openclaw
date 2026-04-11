@@ -25,14 +25,7 @@ const fetchWithSsrFGuardMock = vi.hoisted(() =>
 );
 
 const sendFailureNotificationAnnounceMock = vi.hoisted(() => vi.fn(async () => undefined));
-const assertCronPayloadModelAllowedMock = vi.hoisted(() => vi.fn(async () => undefined));
-
-vi.mock("../cron/model-override-policy.js", () => ({
-  assertCronPayloadModelAllowed: (...args: unknown[]) =>
-    (assertCronPayloadModelAllowedMock as unknown as (...innerArgs: unknown[]) => Promise<void>)(
-      ...args,
-    ),
-}));
+const closeTrackedBrowserTabsForSessionsMock = vi.hoisted(() => vi.fn(async () => 0));
 
 vi.mock("../infra/net/fetch-guard.js", () => ({
   fetchWithSsrFGuard: (...args: unknown[]) =>
@@ -55,6 +48,10 @@ vi.mock("../cron/delivery.js", async () => {
       )(...args),
   };
 });
+
+vi.mock("../plugin-sdk/browser-maintenance.js", () => ({
+  closeTrackedBrowserTabsForSessions: closeTrackedBrowserTabsForSessionsMock,
+}));
 
 installGatewayTestHooks({ scope: "suite" });
 const CRON_WAIT_TIMEOUT_MS = 3_000;
@@ -254,11 +251,10 @@ describe("gateway server cron", () => {
     // Keep polling helpers deterministic even if other tests left fake timers enabled.
     vi.useRealTimers();
     sendFailureNotificationAnnounceMock.mockClear();
-    assertCronPayloadModelAllowedMock.mockReset();
-    assertCronPayloadModelAllowedMock.mockResolvedValue(undefined);
+    closeTrackedBrowserTabsForSessionsMock.mockClear();
   });
 
-  test("handles cron CRUD, normalization, and patch semantics", { timeout: 20_000 }, async () => {
+  test("handles cron CRUD, normalization, and patch semantics", { timeout: 45_000 }, async () => {
     const { prevSkipCron } = await setupCronTestRun({
       tempPrefix: "openclaw-gw-cron-",
       sessionConfig: { mainKey: "primary" },
@@ -659,8 +655,8 @@ describe("gateway server cron", () => {
         id: "bad-custom-session-job",
         mode: "force",
       });
-      expect(runRes.ok).toBe(false);
-      expect(runRes.error?.message).toContain("invalid cron sessionTarget session id");
+      expect(runRes.ok).toBe(true);
+      expect(runRes.payload).toEqual({ ok: true, ran: false, reason: "invalid-spec" });
       expect(cronIsolatedRun).not.toHaveBeenCalled();
     } finally {
       await cleanupCronTestRun({ ws, server, prevSkipCron });
@@ -702,16 +698,16 @@ describe("gateway server cron", () => {
         ws,
         (payload) => payload?.jobId === jobId && payload?.action === "started",
       );
-      const finishedRun = waitForCronEvent(
-        ws,
-        (payload) => payload?.jobId === jobId && payload?.action === "finished",
-      );
       const runRes = await rpcReq(ws, "cron.run", { id: jobId, mode: "force" }, 1_000);
       expect(runRes.ok).toBe(true);
       expect(runRes.payload).toEqual({ ok: true, enqueued: true, runId: expect.any(String) });
       await startedRun;
       expect(cronIsolatedRun).toHaveBeenCalledTimes(1);
 
+      const finishedRun = waitForCronEvent(
+        ws,
+        (payload) => payload?.jobId === jobId && payload?.action === "finished",
+      );
       resolveRun?.({ status: "ok", summary: "background finished" });
       const finishedPayload = await finishedRun;
       expect(finishedPayload).toMatchObject({
@@ -818,125 +814,6 @@ describe("gateway server cron", () => {
       expect(runRes.ok).toBe(true);
       expect(runRes.payload).toEqual({ ok: true, ran: false, reason: "not-due" });
       expect(cronIsolatedRun).not.toHaveBeenCalled();
-    } finally {
-      await cleanupCronTestRun({ ws, server, prevSkipCron });
-    }
-  });
-
-  test("rejects cron.add when save-time payload.model validation fails", async () => {
-    const { prevSkipCron } = await setupCronTestRun({
-      tempPrefix: "openclaw-gw-cron-model-add-",
-      cronEnabled: false,
-    });
-
-    assertCronPayloadModelAllowedMock.mockRejectedValueOnce(
-      new Error(
-        "cron payload.model 'openai-codex/gpt-5.2' is not allowed by policy. Remove payload.model to use agent defaults.",
-      ),
-    );
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
-    try {
-      const response = await rpcReq(ws, "cron.add", {
-        name: "blocked model add",
-        enabled: true,
-        schedule: { kind: "every", everyMs: 60_000 },
-        sessionTarget: "isolated",
-        wakeMode: "now",
-        payload: {
-          kind: "agentTurn",
-          message: "test",
-          model: "openai-codex/gpt-5.2",
-        },
-      });
-
-      expect(response.ok).toBe(false);
-      expect(assertCronPayloadModelAllowedMock).toHaveBeenCalledOnce();
-      expect(assertCronPayloadModelAllowedMock.mock.calls[0]?.[0]).toMatchObject({
-        job: {
-          sessionTarget: "isolated",
-          payload: {
-            kind: "agentTurn",
-            model: "openai-codex/gpt-5.2",
-          },
-        },
-      });
-
-      const persisted = JSON.parse(
-        await fs.readFile(testState.cronStorePath as string, "utf-8"),
-      ) as {
-        jobs: Array<Record<string, unknown>>;
-      };
-      expect(persisted.jobs).toHaveLength(0);
-    } finally {
-      await cleanupCronTestRun({ ws, server, prevSkipCron });
-    }
-  });
-
-  test("rejects cron.update when save-time payload.model validation fails", async () => {
-    const { prevSkipCron } = await setupCronTestRun({
-      tempPrefix: "openclaw-gw-cron-model-update-",
-      cronEnabled: false,
-    });
-
-    const { server, ws } = await startServerWithClient();
-    await connectOk(ws);
-
-    try {
-      const addResponse = await rpcReq(ws, "cron.add", {
-        name: "model update source",
-        enabled: true,
-        schedule: { kind: "every", everyMs: 60_000 },
-        sessionTarget: "isolated",
-        wakeMode: "now",
-        payload: {
-          kind: "agentTurn",
-          message: "before",
-        },
-      });
-      expect(addResponse.ok).toBe(true);
-      const jobIdValue = (addResponse.payload as { id?: unknown } | null)?.id;
-      const jobId = typeof jobIdValue === "string" ? jobIdValue : "";
-      expect(jobId.length > 0).toBe(true);
-
-      assertCronPayloadModelAllowedMock.mockClear();
-      assertCronPayloadModelAllowedMock.mockRejectedValueOnce(
-        new Error(
-          "cron payload.model 'openai-codex/gpt-5.2' is not allowed by policy. Remove payload.model to use agent defaults.",
-        ),
-      );
-
-      const updateResponse = await rpcReq(ws, "cron.update", {
-        id: jobId,
-        patch: {
-          payload: {
-            model: "openai-codex/gpt-5.2",
-          },
-        },
-      });
-
-      expect(updateResponse.ok).toBe(false);
-      expect(assertCronPayloadModelAllowedMock).toHaveBeenCalledOnce();
-      expect(assertCronPayloadModelAllowedMock.mock.calls[0]?.[0]).toMatchObject({
-        job: {
-          id: jobId,
-          payload: {
-            kind: "agentTurn",
-            message: "before",
-            model: "openai-codex/gpt-5.2",
-          },
-        },
-      });
-
-      const persisted = JSON.parse(
-        await fs.readFile(testState.cronStorePath as string, "utf-8"),
-      ) as {
-        jobs: Array<{ id?: string; payload?: Record<string, unknown> }>;
-      };
-      const stored = persisted.jobs.find((job) => job.id === jobId);
-      expect(stored?.payload).toEqual({ kind: "agentTurn", message: "before" });
     } finally {
       await cleanupCronTestRun({ ws, server, prevSkipCron });
     }

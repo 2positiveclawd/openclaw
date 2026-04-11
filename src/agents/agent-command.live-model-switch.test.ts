@@ -168,6 +168,7 @@ vi.mock("../logging/subsystem.js", () => ({
 
 vi.mock("../routing/session-key.js", () => ({
   normalizeAgentId: (id: string) => id,
+  normalizeMainKey: (key?: string | null) => key?.trim() || "main",
 }));
 
 vi.mock("../runtime.js", () => ({
@@ -200,6 +201,7 @@ vi.mock("../utils/message-channel.js", () => ({
 const resolveEffectiveModelFallbacksMock = vi.fn().mockReturnValue(undefined);
 vi.mock("./agent-scope.js", () => ({
   listAgentIds: () => ["default"],
+  resolveAgentConfig: () => undefined,
   resolveAgentDir: () => "/tmp/agent",
   resolveEffectiveModelFallbacks: resolveEffectiveModelFallbacksMock,
   resolveSessionAgentId: () => "default",

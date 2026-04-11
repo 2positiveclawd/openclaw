@@ -1,45 +1,23 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildMinimaxVideoGenerationProvider } from "./video-generation-provider.js";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  getMinimaxProviderHttpMocks,
+  installMinimaxProviderHttpMockCleanup,
+  loadMinimaxVideoGenerationProviderModule,
+} from "./provider-http.test-helpers.js";
 
-const {
-  resolveApiKeyForProviderMock,
-  postJsonRequestMock,
-  fetchWithTimeoutMock,
-  assertOkOrThrowHttpErrorMock,
-  resolveProviderHttpRequestConfigMock,
-} = vi.hoisted(() => ({
-  resolveApiKeyForProviderMock: vi.fn(async () => ({ apiKey: "minimax-key" })),
-  postJsonRequestMock: vi.fn(),
-  fetchWithTimeoutMock: vi.fn(),
-  assertOkOrThrowHttpErrorMock: vi.fn(async () => {}),
-  resolveProviderHttpRequestConfigMock: vi.fn((params) => ({
-    baseUrl: params.baseUrl ?? params.defaultBaseUrl,
-    allowPrivateNetwork: false,
-    headers: new Headers(params.defaultHeaders),
-    dispatcherPolicy: undefined,
-  })),
-}));
+const { postJsonRequestMock, fetchWithTimeoutMock } = getMinimaxProviderHttpMocks();
 
-vi.mock("openclaw/plugin-sdk/provider-auth-runtime", () => ({
-  resolveApiKeyForProvider: resolveApiKeyForProviderMock,
-}));
+let buildMinimaxVideoGenerationProvider: Awaited<
+  ReturnType<typeof loadMinimaxVideoGenerationProviderModule>
+>["buildMinimaxVideoGenerationProvider"];
 
-vi.mock("openclaw/plugin-sdk/provider-http", () => ({
-  assertOkOrThrowHttpError: assertOkOrThrowHttpErrorMock,
-  fetchWithTimeout: fetchWithTimeoutMock,
-  postJsonRequest: postJsonRequestMock,
-  resolveProviderHttpRequestConfig: resolveProviderHttpRequestConfigMock,
-}));
+beforeAll(async () => {
+  ({ buildMinimaxVideoGenerationProvider } = await loadMinimaxVideoGenerationProviderModule());
+});
+
+installMinimaxProviderHttpMockCleanup();
 
 describe("minimax video generation provider", () => {
-  afterEach(() => {
-    resolveApiKeyForProviderMock.mockClear();
-    postJsonRequestMock.mockReset();
-    fetchWithTimeoutMock.mockReset();
-    assertOkOrThrowHttpErrorMock.mockClear();
-    resolveProviderHttpRequestConfigMock.mockClear();
-  });
-
   it("creates a task, polls status, and downloads the generated video", async () => {
     postJsonRequestMock.mockResolvedValue({
       response: {
@@ -71,11 +49,15 @@ describe("minimax video generation provider", () => {
       model: "MiniMax-Hailuo-2.3",
       prompt: "A fox sprints across snowy hills",
       cfg: {},
+      durationSeconds: 5,
     });
 
     expect(postJsonRequestMock).toHaveBeenCalledWith(
       expect.objectContaining({
         url: "https://api.minimax.io/v1/video_generation",
+        body: expect.objectContaining({
+          duration: 6,
+        }),
       }),
     );
     expect(result.videos).toHaveLength(1);

@@ -6,6 +6,7 @@ import {
   postJsonRequest,
   resolveProviderHttpRequestConfig,
 } from "openclaw/plugin-sdk/provider-http";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/text-runtime";
 import type {
   GeneratedVideoAsset,
   VideoGenerationProvider,
@@ -17,6 +18,10 @@ const DEFAULT_MINIMAX_VIDEO_MODEL = "MiniMax-Hailuo-2.3";
 const DEFAULT_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 10_000;
 const MAX_POLL_ATTEMPTS = 90;
+const MINIMAX_MODEL_ALLOWED_DURATIONS: Readonly<Record<string, readonly number[]>> = {
+  "MiniMax-Hailuo-2.3": [6, 10],
+  "MiniMax-Hailuo-02": [6, 10],
+};
 
 type MinimaxBaseResp = {
   status_code?: number;
@@ -47,7 +52,7 @@ type MinimaxFileRetrieveResponse = {
 function resolveMinimaxVideoBaseUrl(
   cfg: Parameters<typeof resolveApiKeyForProvider>[0]["cfg"],
 ): string {
-  const direct = cfg?.models?.providers?.minimax?.baseUrl?.trim();
+  const direct = normalizeOptionalString(cfg?.models?.providers?.minimax?.baseUrl);
   if (!direct) {
     return DEFAULT_MINIMAX_VIDEO_BASE_URL;
   }
@@ -76,13 +81,31 @@ function resolveFirstFrameImage(req: VideoGenerationRequest): string | undefined
   if (!input) {
     return undefined;
   }
-  if (input.url?.trim()) {
-    return input.url.trim();
+  const inputUrl = normalizeOptionalString(input.url);
+  if (inputUrl) {
+    return inputUrl;
   }
   if (!input.buffer) {
     throw new Error("MiniMax image-to-video input is missing image data.");
   }
-  return toDataUrl(input.buffer, input.mimeType?.trim() || "image/png");
+  return toDataUrl(input.buffer, normalizeOptionalString(input.mimeType) ?? "image/png");
+}
+
+function resolveDurationSeconds(params: {
+  model: string;
+  durationSeconds: number | undefined;
+}): number | undefined {
+  if (typeof params.durationSeconds !== "number" || !Number.isFinite(params.durationSeconds)) {
+    return undefined;
+  }
+  const rounded = Math.max(1, Math.round(params.durationSeconds));
+  const allowed = MINIMAX_MODEL_ALLOWED_DURATIONS[params.model];
+  if (!allowed || allowed.length === 0) {
+    return rounded;
+  }
+  return allowed.reduce((best, current) =>
+    Math.abs(current - rounded) < Math.abs(best - rounded) ? current : best,
+  );
 }
 
 async function pollMinimaxVideo(params: {
@@ -107,11 +130,14 @@ async function pollMinimaxVideo(params: {
     await assertOkOrThrowHttpError(response, "MiniMax video status request failed");
     const payload = (await response.json()) as MinimaxQueryResponse;
     assertMinimaxBaseResp(payload.base_resp, "MiniMax video generation failed");
-    switch (payload.status?.trim()) {
+    switch (normalizeOptionalString(payload.status)) {
       case "Success":
         return payload;
       case "Fail":
-        throw new Error(payload.base_resp?.status_msg?.trim() || "MiniMax video generation failed");
+        throw new Error(
+          normalizeOptionalString(payload.base_resp?.status_msg) ||
+            "MiniMax video generation failed",
+        );
       case "Preparing":
       case "Processing":
       default:
@@ -134,7 +160,7 @@ async function downloadVideoFromUrl(params: {
     params.fetchFn,
   );
   await assertOkOrThrowHttpError(response, "MiniMax generated video download failed");
-  const mimeType = response.headers.get("content-type")?.trim() || "video/mp4";
+  const mimeType = normalizeOptionalString(response.headers.get("content-type")) ?? "video/mp4";
   const arrayBuffer = await response.arrayBuffer();
   return {
     buffer: Buffer.from(arrayBuffer),
@@ -167,7 +193,7 @@ async function downloadVideoFromFileId(params: {
   );
   const metadata = (await metadataResponse.json()) as MinimaxFileRetrieveResponse;
   assertMinimaxBaseResp(metadata.base_resp, "MiniMax generated video metadata request failed");
-  const downloadUrl = metadata.file?.download_url?.trim();
+  const downloadUrl = normalizeOptionalString(metadata.file?.download_url);
   if (!downloadUrl) {
     throw new Error("MiniMax generated video metadata missing download_url");
   }
@@ -178,13 +204,14 @@ async function downloadVideoFromFileId(params: {
     params.fetchFn,
   );
   await assertOkOrThrowHttpError(response, "MiniMax generated video download failed");
-  const mimeType = response.headers.get("content-type")?.trim() || "video/mp4";
+  const mimeType = normalizeOptionalString(response.headers.get("content-type")) ?? "video/mp4";
   const arrayBuffer = await response.arrayBuffer();
   return {
     buffer: Buffer.from(arrayBuffer),
     mimeType,
     fileName:
-      metadata.file?.filename?.trim() || `video-1.${mimeType.includes("webm") ? "webm" : "mp4"}`,
+      normalizeOptionalString(metadata.file?.filename) ||
+      `video-1.${mimeType.includes("webm") ? "webm" : "mp4"}`,
   };
 }
 
@@ -207,12 +234,25 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         agentDir,
       }),
     capabilities: {
-      maxVideos: 1,
-      maxInputImages: 1,
-      maxInputVideos: 0,
-      maxDurationSeconds: 10,
-      supportsResolution: true,
-      supportsWatermark: false,
+      generate: {
+        maxVideos: 1,
+        maxDurationSeconds: 10,
+        supportedDurationSecondsByModel: MINIMAX_MODEL_ALLOWED_DURATIONS,
+        supportsResolution: true,
+        supportsWatermark: false,
+      },
+      imageToVideo: {
+        enabled: true,
+        maxVideos: 1,
+        maxInputImages: 1,
+        maxDurationSeconds: 10,
+        supportedDurationSecondsByModel: MINIMAX_MODEL_ALLOWED_DURATIONS,
+        supportsResolution: true,
+        supportsWatermark: false,
+      },
+      videoToVideo: {
+        enabled: false,
+      },
     },
     async generateVideo(req) {
       if ((req.inputVideos?.length ?? 0) > 0) {
@@ -242,8 +282,9 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
           capability: "video",
           transport: "http",
         });
+      const model = normalizeOptionalString(req.model) ?? DEFAULT_MINIMAX_VIDEO_MODEL;
       const body: Record<string, unknown> = {
-        model: req.model?.trim() || DEFAULT_MINIMAX_VIDEO_MODEL,
+        model,
         prompt: req.prompt,
       };
       const firstFrameImage = resolveFirstFrameImage(req);
@@ -253,8 +294,12 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
       if (req.resolution) {
         body.resolution = req.resolution;
       }
-      if (typeof req.durationSeconds === "number" && Number.isFinite(req.durationSeconds)) {
-        body.duration = Math.max(1, Math.round(req.durationSeconds));
+      const durationSeconds = resolveDurationSeconds({
+        model,
+        durationSeconds: req.durationSeconds,
+      });
+      if (typeof durationSeconds === "number") {
+        body.duration = durationSeconds;
       }
       const { response, release } = await postJsonRequest({
         url: `${baseUrl}/v1/video_generation`,
@@ -269,7 +314,7 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
         await assertOkOrThrowHttpError(response, "MiniMax video generation failed");
         const submitted = (await response.json()) as MinimaxCreateResponse;
         assertMinimaxBaseResp(submitted.base_resp, "MiniMax video generation failed");
-        const taskId = submitted.task_id?.trim();
+        const taskId = normalizeOptionalString(submitted.task_id);
         if (!taskId) {
           throw new Error("MiniMax video generation response missing task_id");
         }
@@ -280,8 +325,8 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
           baseUrl,
           fetchFn,
         });
-        const videoUrl = completed.video_url?.trim();
-        const fileId = completed.file_id?.trim();
+        const videoUrl = normalizeOptionalString(completed.video_url);
+        const fileId = normalizeOptionalString(completed.file_id);
         const video = videoUrl
           ? await downloadVideoFromUrl({
               url: videoUrl,
@@ -303,7 +348,7 @@ export function buildMinimaxVideoGenerationProvider(): VideoGenerationProvider {
               })();
         return {
           videos: [video],
-          model: req.model?.trim() || DEFAULT_MINIMAX_VIDEO_MODEL,
+          model,
           metadata: {
             taskId,
             status: completed.status,

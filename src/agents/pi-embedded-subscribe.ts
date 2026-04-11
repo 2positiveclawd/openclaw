@@ -8,12 +8,18 @@ import { emitAgentEvent } from "../infra/agent-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import type { InlineCodeState } from "../markdown/code-spans.js";
 import { buildCodeSpanIndex, createInlineCodeState } from "../markdown/code-spans.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { EmbeddedBlockChunker } from "./pi-embedded-block-chunker.js";
 import {
   isMessagingToolDuplicateNormalized,
   normalizeTextForComparison,
 } from "./pi-embedded-helpers.js";
 import type { BlockReplyPayload } from "./pi-embedded-payloads.js";
+import {
+  createEmbeddedRunReplayState,
+  mergeEmbeddedRunReplayState,
+} from "./pi-embedded-runner/replay-state.js";
+import type { EmbeddedRunLivenessState } from "./pi-embedded-runner/types.js";
 import { createEmbeddedPiSessionEventHandler } from "./pi-embedded-subscribe.handlers.js";
 import { consumePendingToolMediaIntoReply } from "./pi-embedded-subscribe.handlers.messages.js";
 import type {
@@ -30,6 +36,30 @@ const THINKING_TAG_SCAN_RE = /<\s*(\/?)\s*(?:think(?:ing)?|thought|antthinking)\
 const FINAL_TAG_SCAN_RE = /<\s*(\/?)\s*final\s*>/gi;
 const log = createSubsystemLogger("agent/embedded");
 
+function collectPendingMediaFromInternalEvents(
+  events: SubscribeEmbeddedPiSessionParams["internalEvents"],
+): string[] {
+  if (!events?.length) {
+    return [];
+  }
+  const pending: string[] = [];
+  const seen = new Set<string>();
+  for (const event of events) {
+    if (!Array.isArray(event.mediaUrls)) {
+      continue;
+    }
+    for (const mediaUrl of event.mediaUrls) {
+      const normalized = normalizeOptionalString(mediaUrl) ?? "";
+      if (!normalized || seen.has(normalized)) {
+        continue;
+      }
+      seen.add(normalized);
+      pending.push(normalized);
+    }
+  }
+  return pending;
+}
+
 export type {
   BlockReplyChunking,
   SubscribeEmbeddedPiSessionParams,
@@ -40,6 +70,7 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
   const reasoningMode = params.reasoningMode ?? "off";
   const toolResultFormat = params.toolResultFormat ?? "markdown";
   const useMarkdown = toolResultFormat === "markdown";
+  const initialPendingToolMediaUrls = collectPendingMediaFromInternalEvents(params.internalEvents);
   const state: EmbeddedPiSubscribeState = {
     assistantTexts: [],
     toolMetas: [],
@@ -78,6 +109,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     compactionRetryReject: undefined,
     compactionRetryPromise: null,
     unsubscribed: false,
+    replayState: createEmbeddedRunReplayState(params.initialReplayState),
+    livenessState: "working",
+    hadDeterministicSideEffect: false,
     messagingToolSentTexts: [],
     messagingToolSentTextsNormalized: [],
     messagingToolSentTargets: [],
@@ -86,8 +120,9 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     pendingMessagingTargets: new Map(),
     successfulCronAdds: 0,
     pendingMessagingMediaUrls: new Map(),
-    pendingToolMediaUrls: [],
+    pendingToolMediaUrls: initialPendingToolMediaUrls,
     pendingToolAudioAsVoice: false,
+    deterministicApprovalPromptPending: false,
     deterministicApprovalPromptSent: false,
   };
   const usageTotals = {
@@ -644,6 +679,11 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
   };
 
   const resetForCompactionRetry = () => {
+    state.hadDeterministicSideEffect =
+      state.hadDeterministicSideEffect === true ||
+      messagingToolSentTexts.length > 0 ||
+      messagingToolSentMediaUrls.length > 0 ||
+      state.successfulCronAdds > 0;
     assistantTexts.length = 0;
     toolMetas.length = 0;
     toolMetaById.clear();
@@ -662,7 +702,10 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     state.pendingMessagingMediaUrls.clear();
     state.pendingToolMediaUrls = [];
     state.pendingToolAudioAsVoice = false;
+    state.deterministicApprovalPromptPending = false;
     state.deterministicApprovalPromptSent = false;
+    state.replayState = mergeEmbeddedRunReplayState(state.replayState, params.initialReplayState);
+    state.livenessState = "working";
     resetAssistantMessageState(0);
   };
 
@@ -744,12 +787,24 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     assistantTexts,
     toolMetas,
     unsubscribe,
+    setTerminalLifecycleMeta: (meta: {
+      replayInvalid?: boolean;
+      livenessState?: EmbeddedRunLivenessState;
+    }) => {
+      if (typeof meta.replayInvalid === "boolean") {
+        state.replayState = { ...state.replayState, replayInvalid: meta.replayInvalid };
+      }
+      if (meta.livenessState) {
+        state.livenessState = meta.livenessState;
+      }
+    },
     isCompacting: () => state.compactionInFlight || state.pendingCompactionRetry > 0,
     isCompactionInFlight: () => state.compactionInFlight,
     getMessagingToolSentTexts: () => messagingToolSentTexts.slice(),
     getMessagingToolSentMediaUrls: () => messagingToolSentMediaUrls.slice(),
     getMessagingToolSentTargets: () => messagingToolSentTargets.slice(),
     getSuccessfulCronAdds: () => state.successfulCronAdds,
+    getReplayState: () => ({ ...state.replayState }),
     // Returns true if any messaging tool successfully sent a message.
     // Used to suppress agent's confirmation text (e.g., "Respondi no Telegram!")
     // which is generated AFTER the tool sends the actual answer.

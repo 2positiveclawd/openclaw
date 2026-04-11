@@ -1,41 +1,49 @@
-import { resolveGatewayAuth } from "../gateway/auth.js";
-import type { OpenClawConfig } from "./browser-support.js";
+import type { OpenClawConfig } from "../config/config.js";
+import { loadBundledPluginPublicSurfaceModuleSync } from "./facade-loader.js";
 
 export type BrowserControlAuth = {
   token?: string;
   password?: string;
 };
 
-export function resolveBrowserControlAuth(
-  cfg: OpenClawConfig | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): BrowserControlAuth {
-  const auth = resolveGatewayAuth({
-    authConfig: cfg?.gateway?.auth,
-    env,
-    tailscaleMode: cfg?.gateway?.tailscale?.mode,
-  });
-  const token = typeof auth.token === "string" ? auth.token.trim() : "";
-  const password = typeof auth.password === "string" ? auth.password.trim() : "";
-  return {
-    token: token || undefined,
-    password: password || undefined,
-  };
-}
+type EnsureBrowserControlAuthParams = {
+  cfg: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+};
 
-type BrowserControlAuthModule = typeof import("@openclaw/browser/browser-control-auth.js");
-import { loadBundledPluginPublicSurfaceModuleSync } from "./facade-runtime.js";
+type EnsureBrowserControlAuthResult = {
+  auth: BrowserControlAuth;
+  generatedToken?: string;
+};
 
-function loadBrowserControlAuthModule(): BrowserControlAuthModule {
-  return loadBundledPluginPublicSurfaceModuleSync<BrowserControlAuthModule>({
+type BrowserControlAuthSurface = {
+  resolveBrowserControlAuth: (cfg?: OpenClawConfig, env?: NodeJS.ProcessEnv) => BrowserControlAuth;
+  shouldAutoGenerateBrowserAuth: (env: NodeJS.ProcessEnv) => boolean;
+  ensureBrowserControlAuth: (
+    params: EnsureBrowserControlAuthParams,
+  ) => Promise<EnsureBrowserControlAuthResult>;
+};
+
+function loadBrowserControlAuthSurface(): BrowserControlAuthSurface {
+  return loadBundledPluginPublicSurfaceModuleSync<BrowserControlAuthSurface>({
     dirName: "browser",
     artifactBasename: "browser-control-auth.js",
   });
 }
 
-export const ensureBrowserControlAuth: BrowserControlAuthModule["ensureBrowserControlAuth"] = ((
-  ...args
-) =>
-  loadBrowserControlAuthModule().ensureBrowserControlAuth(
-    ...args,
-  )) as BrowserControlAuthModule["ensureBrowserControlAuth"];
+export function resolveBrowserControlAuth(
+  cfg?: OpenClawConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): BrowserControlAuth {
+  return loadBrowserControlAuthSurface().resolveBrowserControlAuth(cfg, env);
+}
+
+export function shouldAutoGenerateBrowserAuth(env: NodeJS.ProcessEnv): boolean {
+  return loadBrowserControlAuthSurface().shouldAutoGenerateBrowserAuth(env);
+}
+
+export async function ensureBrowserControlAuth(
+  params: EnsureBrowserControlAuthParams,
+): Promise<EnsureBrowserControlAuthResult> {
+  return await loadBrowserControlAuthSurface().ensureBrowserControlAuth(params);
+}

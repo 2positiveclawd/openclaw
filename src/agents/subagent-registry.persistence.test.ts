@@ -7,7 +7,25 @@ import {
   clearSessionStoreCacheForTest,
   drainSessionStoreLockQueuesForTest,
 } from "../config/sessions/store.js";
+import { callGateway } from "../gateway/call.js";
+import { onAgentEvent } from "../infra/agent-events.js";
 import { captureEnv, withEnv } from "../test-utils/env.js";
+import { persistSubagentSessionTiming } from "./subagent-registry-helpers.js";
+import {
+  __testing,
+  addSubagentRunForTests,
+  clearSubagentRunSteerRestart,
+  getLatestSubagentRunByChildSessionKey,
+  getSubagentRunByChildSessionKey,
+  initSubagentRegistry,
+  listSubagentRunsForRequester,
+  registerSubagentRun,
+  resetSubagentRegistryForTests,
+} from "./subagent-registry.js";
+import {
+  loadSubagentRegistryFromDisk,
+  resolveSubagentRegistryPath,
+} from "./subagent-registry.store.js";
 
 const { announceSpy } = vi.hoisted(() => ({
   announceSpy: vi.fn(async () => true),
@@ -19,29 +37,6 @@ vi.mock("./subagent-announce.js", () => ({
 vi.mock("./subagent-orphan-recovery.js", () => ({
   scheduleOrphanRecovery: vi.fn(),
 }));
-
-let addSubagentRunForTests: typeof import("./subagent-registry.js").addSubagentRunForTests;
-let clearSubagentRunSteerRestart: typeof import("./subagent-registry.js").clearSubagentRunSteerRestart;
-let getSubagentRunByChildSessionKey: typeof import("./subagent-registry.js").getSubagentRunByChildSessionKey;
-let getLatestSubagentRunByChildSessionKey: typeof import("./subagent-registry.js").getLatestSubagentRunByChildSessionKey;
-let initSubagentRegistry: typeof import("./subagent-registry.js").initSubagentRegistry;
-let listSubagentRunsForRequester: typeof import("./subagent-registry.js").listSubagentRunsForRequester;
-let resetSubagentRegistryForTests: typeof import("./subagent-registry.js").resetSubagentRegistryForTests;
-let loadSubagentRegistryFromDisk: typeof import("./subagent-registry.store.js").loadSubagentRegistryFromDisk;
-
-async function loadSubagentRegistryModules(): Promise<void> {
-  vi.resetModules();
-  ({
-    addSubagentRunForTests,
-    clearSubagentRunSteerRestart,
-    getLatestSubagentRunByChildSessionKey,
-    getSubagentRunByChildSessionKey,
-    initSubagentRegistry,
-    listSubagentRunsForRequester,
-    resetSubagentRegistryForTests,
-  } = await import("./subagent-registry.js"));
-  ({ loadSubagentRegistryFromDisk } = await import("./subagent-registry.store.js"));
-}
 
 describe("subagent registry persistence", () => {
   const envSnapshot = captureEnv(["OPENCLAW_STATE_DIR"]);
@@ -184,10 +179,10 @@ describe("subagent registry persistence", () => {
     await flushQueuedRegistryWork();
   };
 
-  beforeEach(async () => {
-    await loadSubagentRegistryModules();
-    const { callGateway } = await import("../gateway/call.js");
-    const { onAgentEvent } = await import("../infra/agent-events.js");
+  beforeEach(() => {
+    __testing.setDepsForTest({
+      runSubagentAnnounceFlow: announceSpy,
+    });
     vi.mocked(callGateway).mockReset();
     vi.mocked(callGateway).mockResolvedValue({
       status: "ok",
@@ -200,6 +195,7 @@ describe("subagent registry persistence", () => {
 
   afterEach(async () => {
     announceSpy.mockClear();
+    __testing.setDepsForTest();
     resetSubagentRegistryForTests({ persist: false });
     await drainSessionStoreLockQueuesForTest();
     clearSessionStoreCacheForTest();
@@ -214,7 +210,6 @@ describe("subagent registry persistence", () => {
     tempStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-subagent-"));
     process.env.OPENCLAW_STATE_DIR = tempStateDir;
 
-    const { persistSubagentSessionTiming } = await import("./subagent-registry-helpers.js");
     const now = Date.now();
     const startedAt = now;
     const endedAt = now + 500;
@@ -323,6 +318,77 @@ describe("subagent registry persistence", () => {
 
     const after = JSON.parse(await fs.readFile(registryPath, "utf8")) as { version?: number };
     expect(after.version).toBe(2);
+  });
+
+  it("normalizes persisted and newly registered session keys to canonical trimmed values", async () => {
+    const persisted = {
+      version: 2,
+      runs: {
+        "run-spaced": {
+          runId: "run-spaced",
+          childSessionKey: " agent:main:subagent:spaced-child ",
+          controllerSessionKey: " agent:main:subagent:controller ",
+          requesterSessionKey: " agent:main:main ",
+          requesterDisplayKey: "main",
+          task: "spaced persisted keys",
+          cleanup: "keep",
+          createdAt: 1,
+          startedAt: 1,
+        },
+      },
+    };
+    await writePersistedRegistry(persisted, { seedChildSessions: false });
+
+    const restored = loadSubagentRegistryFromDisk();
+    const restoredEntry = restored.get("run-spaced");
+    expect(restoredEntry).toMatchObject({
+      childSessionKey: "agent:main:subagent:spaced-child",
+      controllerSessionKey: "agent:main:subagent:controller",
+      requesterSessionKey: "agent:main:main",
+    });
+
+    resetSubagentRegistryForTests({ persist: false });
+    addSubagentRunForTests(restoredEntry as never);
+    expect(listSubagentRunsForRequester("agent:main:main")).toEqual([
+      expect.objectContaining({
+        runId: "run-spaced",
+      }),
+    ]);
+    expect(getSubagentRunByChildSessionKey("agent:main:subagent:spaced-child")).toMatchObject({
+      runId: "run-spaced",
+    });
+
+    resetSubagentRegistryForTests({ persist: false });
+    tempStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-subagent-"));
+    process.env.OPENCLAW_STATE_DIR = tempStateDir;
+
+    vi.mocked(callGateway).mockResolvedValue({
+      status: "ok",
+      startedAt: 111,
+      endedAt: 222,
+    });
+
+    registerSubagentRun({
+      runId: " run-live ",
+      childSessionKey: " agent:main:subagent:live-child ",
+      controllerSessionKey: " agent:main:subagent:live-controller ",
+      requesterSessionKey: " agent:main:main ",
+      requesterDisplayKey: "main",
+      task: "live spaced keys",
+      cleanup: "keep",
+    });
+
+    expect(listSubagentRunsForRequester("agent:main:main")).toEqual([
+      expect.objectContaining({
+        runId: "run-live",
+        childSessionKey: "agent:main:subagent:live-child",
+        controllerSessionKey: "agent:main:subagent:live-controller",
+        requesterSessionKey: "agent:main:main",
+      }),
+    ]);
+    expect(getSubagentRunByChildSessionKey("agent:main:subagent:live-child")).toMatchObject({
+      runId: "run-live",
+    });
   });
 
   it("retries cleanup announce after a failed announce", async () => {
@@ -601,8 +667,6 @@ describe("subagent registry persistence", () => {
 
   it("uses isolated temp state when OPENCLAW_STATE_DIR is unset in tests", async () => {
     delete process.env.OPENCLAW_STATE_DIR;
-    vi.resetModules();
-    const { resolveSubagentRegistryPath } = await import("./subagent-registry.store.js");
     const registryPath = resolveSubagentRegistryPath();
     expect(registryPath).toContain(path.join(os.tmpdir(), "openclaw-test-state"));
   });

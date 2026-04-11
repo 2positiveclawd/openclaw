@@ -38,12 +38,9 @@ describe("google video generation provider", () => {
     vi.spyOn(providerAuthRuntime, "resolveApiKeyForProvider").mockResolvedValue({
       apiKey: "google-key",
       source: "env",
+      mode: "api-key",
     });
     generateVideosMock.mockResolvedValue({
-      done: false,
-      name: "operations/123",
-    });
-    getVideosOperationMock.mockResolvedValue({
       done: true,
       name: "operations/123",
       response: {
@@ -70,12 +67,13 @@ describe("google video generation provider", () => {
       audio: true,
     });
 
-    expect(generateVideosMock).toHaveBeenCalledWith(
+    expect(generateVideosMock).toHaveBeenCalledTimes(1);
+    const [request] = generateVideosMock.mock.calls[0] ?? [];
+    expect(request).toEqual(
       expect.objectContaining({
         model: "veo-3.1-fast-generate-preview",
         prompt: "A tiny robot watering a windowsill garden",
         config: expect.objectContaining({
-          numberOfVideos: 1,
           durationSeconds: 4,
           aspectRatio: "16:9",
           resolution: "720p",
@@ -83,6 +81,7 @@ describe("google video generation provider", () => {
         }),
       }),
     );
+    expect(request?.config).not.toHaveProperty("numberOfVideos");
     expect(result.videos).toHaveLength(1);
     expect(result.videos[0]?.mimeType).toBe("video/mp4");
     expect(GoogleGenAIMock).toHaveBeenCalledWith(
@@ -100,6 +99,7 @@ describe("google video generation provider", () => {
     vi.spyOn(providerAuthRuntime, "resolveApiKeyForProvider").mockResolvedValue({
       apiKey: "google-key",
       source: "env",
+      mode: "api-key",
     });
     const provider = buildGoogleVideoGenerationProvider();
 
@@ -113,5 +113,43 @@ describe("google video generation provider", () => {
         inputVideos: [{ buffer: Buffer.from("vid"), mimeType: "video/mp4" }],
       }),
     ).rejects.toThrow("Google video generation does not support image and video inputs together.");
+  });
+
+  it("rounds unsupported durations to the nearest Veo value", async () => {
+    vi.spyOn(providerAuthRuntime, "resolveApiKeyForProvider").mockResolvedValue({
+      apiKey: "google-key",
+      source: "env",
+      mode: "api-key",
+    });
+    generateVideosMock.mockResolvedValue({
+      done: true,
+      response: {
+        generatedVideos: [
+          {
+            video: {
+              videoBytes: Buffer.from("mp4-bytes").toString("base64"),
+              mimeType: "video/mp4",
+            },
+          },
+        ],
+      },
+    });
+
+    const provider = buildGoogleVideoGenerationProvider();
+    await provider.generateVideo({
+      provider: "google",
+      model: "veo-3.1-fast-generate-preview",
+      prompt: "A tiny robot watering a windowsill garden",
+      cfg: {},
+      durationSeconds: 5,
+    });
+
+    expect(generateVideosMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: expect.objectContaining({
+          durationSeconds: 6,
+        }),
+      }),
+    );
   });
 });

@@ -1003,6 +1003,8 @@ Core examples:
 - moderation: `timeout`, `kick`, `ban`
 - presence: `setPresence`
 
+The `event-create` action accepts an optional `image` parameter (URL or local file path) to set the scheduled event cover image.
+
 Action gates live under `channels.discord.actions.*`.
 
 Default gate behavior:
@@ -1237,7 +1239,7 @@ High-signal Discord fields:
 - delivery: `textChunkLimit`, `chunkMode`, `maxLinesPerMessage`
 - streaming: `streaming` (legacy alias: `streamMode`), `draftChunk`, `blockStreaming`, `blockStreamingCoalesce`
 - media/retry: `mediaMaxMb`, `retry`
-  - `mediaMaxMb` caps outbound Discord uploads (default: `8MB`)
+  - `mediaMaxMb` caps outbound Discord uploads (default: `100MB`)
 - actions: `actions.*`
 - presence: `activity`, `status`, `activityType`, `activityUrl`
 - UI: `ui.components.accentColor`
